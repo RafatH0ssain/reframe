@@ -73,10 +73,21 @@ class RouteTests(unittest.TestCase):
         self.assertIn("javascript", response.headers["content-type"])
         self.assertEqual(response.content, JS.read_bytes())
 
-    def test_existing_api_routes_are_not_shadowed_by_static_mount(self):
-        # /static must not swallow the photo-serving routes.
+    def test_static_mount_returns_404_for_missing_asset(self):
+        # A path under /static with no matching file on disk must 404, not
+        # fall through to some other handler or raise.
         response = self.client.get("/static/does-not-exist.css")
         self.assertEqual(response.status_code, 404)
+
+    def test_static_assets_are_revalidated_not_blindly_cached(self):
+        # A stable /static URL whose body changes each release must never be
+        # served from cache without revalidation, or an update leaves new HTML
+        # driving old JavaScript.
+        for path in ("/static/dashboard.css", "/static/dashboard.js"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("no-cache", response.headers.get("cache-control", ""))
 
 
 if __name__ == "__main__":

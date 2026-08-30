@@ -88,6 +88,8 @@ reframe/
 │   ├── reframe-dashboard-proxy.service
 │   ├── reframe-rtc-restore.service
 │   └── reframe-rtc-update.service
+├── templates/                 # dashboard HTML template
+├── static/                    # dashboard CSS and JS, served at /static
 ├── waveshare_epd/             # e-ink display drivers
 ├── hardware/                  # 3D-printable enclosure files
 └── docs/                      # build guide & software setup

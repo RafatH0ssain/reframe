@@ -44,8 +44,25 @@ with open(os.path.join(TEMPLATES_PATH, "dashboard.html"), "r", encoding="utf-8")
 os.makedirs(PHOTOS_PATH, exist_ok=True)
 os.makedirs(DITHERED_PHOTOS_PATH, exist_ok=True)
 
+
+class RevalidatingStaticFiles(StaticFiles):
+    """StaticFiles that forces revalidation instead of heuristic caching.
+
+    /static/dashboard.js is a stable URL whose body changes on every
+    software update. Without an explicit Cache-Control, a browser can cache
+    it heuristically and keep running pre-update JavaScript against
+    post-update HTML after the camera updates, with no visible error.
+    ETag/Last-Modified still let a revalidation collapse to a cheap 304.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 app = FastAPI(title="Reframe Dashboard", description="Control & Gallery Interface for Reframe Camera")
-app.mount("/static", StaticFiles(directory=STATIC_PATH), name="static")
+app.mount("/static", RevalidatingStaticFiles(directory=STATIC_PATH), name="static")
 
 
 def prepare_dithered_export(image_path: str, upscale_2x: bool) -> tuple[bytes, str, str]:

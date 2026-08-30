@@ -16,11 +16,14 @@ required_files=(
     scripts/reframe-apply-update
     scripts/reframe-python
     scripts/reframe-rtc-sync
+    static/dashboard.css
+    static/dashboard.js
     systemd/reframe.service
     systemd/reframe-dashboard.service
     systemd/reframe-dashboard-proxy.service
     systemd/reframe-rtc-restore.service
     systemd/reframe-rtc-update.service
+    templates/dashboard.html
 )
 
 for required in "${required_files[@]}"; do
