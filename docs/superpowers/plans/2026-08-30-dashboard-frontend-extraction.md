@@ -14,7 +14,8 @@
 
 - **No reindentation, ever.** Extracted CSS and JS keep the original's leading whitespace byte-for-byte. The JS contains multi-line template literals whose embedded newlines and indentation become part of the strings they emit; reindenting changes program output, not just formatting.
 - **Zero behavior change.** No feature work, no cleanup, no renames, no "while I'm here" fixes. Anything beyond moving bytes belongs in Phase 1.
-- **Tests use `unittest`, run as `python3 -m unittest` from the repo root.** The existing suite is `tests/test_dashboard_exports.py`; match its style. `pytest` is not a dependency.
+- **Tests use `unittest`, invoked by explicit module name from the repo root** — e.g. `./.venv/bin/python -m unittest tests.test_dashboard_frontend -v`. `tests/` is NOT a package (no `__init__.py`), so `unittest discover` fails with `Start directory is not importable`; do not use it and do not add an `__init__.py` to make it work. The existing suite is `tests/test_dashboard_exports.py`; match its style. `pytest` is not a dependency.
+- **Use the worktree's `./.venv/bin/python`**, never bare `python3` — system Python is 3.9 and lacks FastAPI. The venv is Python 3.12 with fastapi, httpx, starlette, and pillow already installed.
 - **Paths derive from `BASE_PATH`**, never from the current working directory. `dashboard.py` already defines `BASE_PATH = os.path.dirname(os.path.realpath(__file__))`.
 - **Verified source boundaries** (as of commit `a0f61c8`): `html_content = """` at line 829, `<style>` at 836, `</style>` at 1472, `<script>` at 1735, `</script>` at 3052, closing `"""` at 3055. CSS body is lines 837-1471 (635 lines); JS body is lines 1736-3051 (1,316 lines).
 - **No new runtime dependencies.** `StaticFiles` ships with Starlette, already installed via FastAPI.
@@ -35,13 +36,13 @@
 
 This must run before `dashboard.py` is touched. If `dashboard.py` has already been modified, `git stash` first — a baseline captured after the refactor proves nothing.
 
-Run this in the environment the dashboard itself runs in — `dashboard.py`
-imports `fastapi`, `httpx`, and `PIL`. On the Pi use `./scripts/reframe-python`
-in place of `python3`.
+Run this with the worktree venv — `dashboard.py` imports `fastapi`, `httpx`,
+and `PIL`, none of which exist in system Python 3.9. (On the Pi, the equivalent
+is `./scripts/reframe-python`.)
 
 ```bash
 mkdir -p tests/fixtures
-python3 - <<'EOF'
+./.venv/bin/python - <<'EOF'
 import asyncio, pathlib, dashboard
 response = asyncio.run(dashboard.dashboard())
 out = pathlib.Path("tests/fixtures/dashboard_baseline.html")
@@ -131,7 +132,7 @@ if __name__ == "__main__":
 - [ ] **Step 4: Run the test to verify it fails for the right reason**
 
 ```bash
-python3 -m unittest tests.test_dashboard_frontend -v
+./.venv/bin/python -m unittest tests.test_dashboard_frontend -v
 ```
 
 Expected: FAIL — `FileNotFoundError` on `templates/dashboard.html`. That is the correct failure; the assets do not exist yet. A different error means the marker constants are wrong.
@@ -161,7 +162,7 @@ git commit -m "test: baseline fixture and reconstruction test for dashboard extr
 Do this by script, not by hand — hand-copying 1,951 lines will introduce errors that the reconstruction test will catch but that waste a cycle. Run from the repo root:
 
 ```bash
-python3 - <<'EOF'
+./.venv/bin/python - <<'EOF'
 from pathlib import Path
 
 STYLE_OPEN = "        <style>\n"
@@ -197,7 +198,7 @@ Expected exactly: `css 635 lines`, `js 1316 lines`, `html 273 lines`. If `.split
 - [ ] **Step 2: Run the reconstruction test to verify it now passes**
 
 ```bash
-python3 -m unittest tests.test_dashboard_frontend -v
+./.venv/bin/python -m unittest tests.test_dashboard_frontend -v
 ```
 
 Expected: 2 tests PASS. This is the proof that every CSS and JS byte survived unaltered. If `test_extracted_assets_reconstruct_original_html_exactly` fails, the extraction changed bytes — do not "fix" the test.
@@ -271,7 +272,7 @@ class RouteTests(unittest.TestCase):
 - [ ] **Step 2: Run to verify the new tests fail**
 
 ```bash
-python3 -m unittest tests.test_dashboard_frontend -v
+./.venv/bin/python -m unittest tests.test_dashboard_frontend -v
 ```
 
 Expected: `ReconstructionTests` still PASS; all four `RouteTests` FAIL — the index still contains `--primary-color`, and `/static/...` returns 404 because nothing is mounted.
@@ -320,7 +321,7 @@ Leave the decorator, `async def dashboard():`, and the docstring on lines 826-82
 - [ ] **Step 7: Run the full test suite**
 
 ```bash
-python3 -m unittest discover -s tests -t . -v
+./.venv/bin/python -m unittest tests.test_dashboard_exports tests.test_dashboard_frontend -v
 ```
 
 Expected: all tests PASS — the 6 tests in `test_dashboard_frontend.py` and the 4 pre-existing tests in `test_dashboard_exports.py`. The export tests must be unaffected; if they broke, something outside the route body was edited.
