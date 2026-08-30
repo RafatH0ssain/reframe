@@ -1,0 +1,274 @@
+
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+        <title>Reframe</title>
+        <link rel="stylesheet" href="/static/dashboard.css">
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <div class="status-bar">
+                <h1>reframe.camera dashboard</h1>
+                <div class="status-item">
+                    <div class="status-indicator"></div>
+                    <span>system online</span>
+                </div>
+                <div class="status-item">
+                    <span id="battery-level">battery: --%</span>
+                </div>
+                <div class="status-item">
+                    <span id="photo-count">loading photos...</span>
+                </div>
+                <div class="status-item">
+                    <button class="button" onclick="refreshGallery()">refresh</button>
+                </div>
+                <button class="button" onclick="capturePhoto()">capture photo</button>
+                <button class="button" onclick="openSettings()">settings</button>
+            </div>
+            </div>
+            
+            <div class="gallery">
+                <div id="photo-grid" class="photo-grid">
+                    <div class="loading">loading photos...</div>
+                </div>
+                
+                <div id="pagination" class="pagination" style="display: none;">
+                    <button class="pagination-btn" id="prev-btn" onclick="changePage(currentPage - 1)">previous</button>
+                    <div id="page-numbers"></div>
+                    <div class="pagination-info">
+                        <span id="pagination-info"></span>
+                    </div>
+                    <form class="pagination-jump" onsubmit="jumpToPage(event)">
+                        <label for="page-jump-input">page</label>
+                        <input type="number" id="page-jump-input" min="1" step="1" inputmode="numeric" aria-label="Go to page">
+                        <button class="pagination-btn" type="submit">go</button>
+                    </form>
+                    <button class="pagination-btn" id="next-btn" onclick="changePage(currentPage + 1)">next</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="settings-modal">
+            <div class="settings-content">
+                <div class="settings-header">
+                    <h2>settings</h2>
+                    <div class="settings-header-actions">
+                        <button class="save-btn" onclick="saveSettings()">save settings</button>
+                        <button class="close-btn" onclick="closeSettings()">close</button>
+                    </div>
+                </div>
+                
+                <div class="settings-grid">
+                <div class="settings-section settings-camera">
+                    <h3>camera settings</h3>
+                    <div class="setting-group disabled-setting">
+                        <div>
+                            <span class="setting-label">resolution width</span>
+                            <input type="number" id="resolution-width" class="setting-input" min="100" max="4000" disabled>
+                        </div>
+                    </div>
+                    <div class="setting-group disabled-setting">
+                        <div>
+                            <span class="setting-label">resolution height</span>
+                            <input type="number" id="resolution-height" class="setting-input" min="100" max="4000" disabled>
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">exposure value</span>
+                            <input type="number" id="exposure-value" class="setting-input" step="0.25" min="-2" max="2">
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">sharpness</span>
+                            <input type="number" id="sharpness" class="setting-input" min="0" max="10">
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">autofocus mode</span>
+                            <select id="autofocus-mode" class="setting-input">
+                                <option value="0">Manual</option>
+                                <option value="1">Auto</option>
+                                <option value="2">Continuous</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="settings-section settings-processing">
+                    <h3>processing settings</h3>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">saturation</span>
+                            <input type="number" id="saturation" class="setting-input" step="0.1" min="0" max="2">
+                        </div>
+                        <div class="setting-help">Blends between muted and saturated 6-color palettes; recommended 0.55–0.70 for natural tones.</div>
+                    </div>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">brightness factor</span>
+                            <input type="number" id="brightness-factor" class="setting-input" step="0.1" min="0.1" max="3">
+                        </div>
+                        <div class="setting-help">Multiplies image brightness before dithering; recommended 1.0–1.1.</div>
+                    </div>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">color factor</span>
+                            <input type="number" id="color-factor" class="setting-input" step="0.1" min="0.1" max="3">
+                        </div>
+                        <div class="setting-help">Boosts color intensity before dithering; recommended 1.1–1.3.</div>
+                    </div>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">dithering method</span>
+                            <select id="dithering-method" class="setting-input">
+                                <option value="floyd_steinberg">floyd steinberg</option>
+                                <option value="ordered">ordered (bayer)</option>
+                            </select>
+                        </div>
+                        <div class="setting-help">Floyd–Steinberg is the default; ordered is still experimental</div>
+                    </div>
+                    <div class="setting-group" id="bayer-settings">
+                        <div>
+                            <span class="setting-label">bayer matrix size</span>
+                            <select id="bayer-size" class="setting-input">
+                                <option value="2">2x2</option>
+                                <option value="4">4x4</option>
+                                <option value="8">8x8</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="setting-group" id="threshold-settings">
+                        <div>
+                            <span class="setting-label">threshold scale</span>
+                            <input type="number" id="threshold-scale" class="setting-input" min="0.1" max="2.0" step="0.1">
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="settings-section settings-system">
+                    <h3>system settings</h3>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">camera name</span>
+                            <input type="text" id="camera-name" class="setting-input" maxlength="80" placeholder="optional">
+                        </div>
+                        <div class="setting-help">Used in Are.na upload descriptions when set.</div>
+                    </div>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">auto refresh interval (seconds)</span>
+                            <input type="number" id="auto-refresh-interval" class="setting-input" min="5" max="300">
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">auto timeout enabled</span>
+                            <select id="auto-timeout-enabled" class="setting-input">
+                                <option value="true">enabled</option>
+                                <option value="false">disabled</option>
+                            </select>
+                        </div>
+                        <div class="setting-help">⚠️ Automatically shuts down the entire Raspberry Pi after inactivity to save battery. You'll need to manually power on the device to use it again.</div>
+                    </div>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">auto timeout duration (minutes)</span>
+                            <input type="number" id="auto-timeout-minutes" class="setting-input" min="1" max="60">
+                        </div>
+                        <div class="setting-help">Time of inactivity before system shuts down automatically</div>
+                    </div>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">dashboard QR on Wi-Fi connect</span>
+                            <select id="show-dashboard-qr-on-wifi-connect" class="setting-input">
+                                <option value="true">enabled</option>
+                                <option value="false">disabled</option>
+                            </select>
+                        </div>
+                        <div class="setting-help">Shows the numeric dashboard address whenever the camera connects or reconnects.</div>
+                    </div>
+                    <div class="setting-group">
+                        <button class="button" onclick="showDashboardQr()" type="button">show dashboard QR</button>
+                    </div>
+
+                </div>
+
+                <div class="settings-section settings-exports">
+                    <h3>advanced exports</h3>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">2× dithered downloads and uploads</span>
+                            <select id="upscale-dithered-2x" class="setting-input">
+                                <option value="false">disabled</option>
+                                <option value="true">enabled</option>
+                            </select>
+                        </div>
+                        <div class="setting-help">Doubles dithered PNG dimensions with nearest-neighbor scaling only when downloading one photo or uploading it to Are.na. This tends to help the dithered photos look sharp on social media. Stored photos and ZIP downloads are unchanged.</div>
+                    </div>
+                </div>
+
+                <div class="settings-section settings-updates">
+                    <h3>software updates</h3>
+                    <div class="setting-group">
+                        <button class="button" id="update-check-btn" onclick="checkForUpdates()" type="button">check for updates</button>
+                        <button class="button" id="update-install-btn" onclick="installUpdate()" type="button" style="display: none;">install update</button>
+                        <div class="setting-help" id="update-status">Updates code, dependencies, and service files while preserving settings and photos.</div>
+                    </div>
+                </div>
+
+                <div class="settings-section settings-extensions">
+                    <h3>extensions</h3>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">are.na upload</span>
+                            <select id="arena-enabled" class="setting-input">
+                                <option value="false">disabled</option>
+                                <option value="true">enabled</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">are.na channel slug or id</span>
+                            <input type="text" id="arena-channel" class="setting-input" placeholder="my-channel">
+                        </div>
+                    </div>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">are.na access token</span>
+                            <input type="password" id="arena-access-token" class="setting-input" placeholder="leave blank to keep saved token">
+                        </div>
+                        <div class="setting-help" id="arena-token-status">No token configured</div>
+                    </div>
+                    <div class="setting-group">
+                        <button class="reset-btn" id="arena-clear-token-btn" onclick="clearArenaToken()" type="button">clear are.na token</button>
+                    </div>
+                </div>
+                </div>
+                
+                <div class="settings-footer-actions">
+                    <button class="save-btn" onclick="saveSettings()">save settings</button>
+                    <button class="reset-btn" onclick="resetSettings()">reset to defaults</button>
+                    <div id="download-controls">
+                        <button class="button" onclick="downloadAllPhotos()">download all photos</button>
+                        <button class="button danger-btn" onclick="abortDownload()" id="abort-btn" style="display: none;">abort download</button>
+                    </div>
+                    <div id="delete-controls">
+                        <button class="button danger-btn" onclick="deleteAllPhotos()">delete all photos</button>
+                        <button class="button danger-btn" onclick="abortDelete()" id="abort-delete-btn" style="display: none;">abort deletion</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <script src="/static/dashboard.js"></script>
+    </body>
+    </html>
+    
