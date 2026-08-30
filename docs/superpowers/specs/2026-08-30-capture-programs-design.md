@@ -271,8 +271,21 @@ with no linting or syntax highlighting on any of it. This design adds roughly
 
 Before any feature work, extract to `templates/dashboard.html`,
 `static/dashboard.css`, and `static/dashboard.js`, served via FastAPI's
-`StaticFiles`. This is a **pure no-behavior-change refactor**, verified by
-capturing the served HTML before and after and diffing it byte-for-byte.
+`StaticFiles`. This is a **pure no-behavior-change refactor**.
+
+**Verification (corrected).** The served HTML necessarily *does* change — the
+`<style>` block becomes a `<link>` and the `<script>` block becomes a
+`<script src>` — so diffing the served HTML before and after cannot work. The
+provable check is a **reconstruction test**: capture the original served HTML
+as a committed fixture, then assert that inlining the extracted static files
+back into the template reproduces that fixture byte-for-byte. Every byte of
+CSS and JS is then proven to have survived the move unaltered.
+
+**No reindentation.** The extracted files keep the original's 4-space Python
+string indentation verbatim. The JavaScript contains multi-line template
+literals whose embedded newlines and leading whitespace become part of the
+strings they emit, so reindenting would change program output rather than just
+formatting. Cosmetic cleanup is not worth forfeiting the byte-exactness proof.
 
 ### New UI
 
@@ -418,8 +431,9 @@ This phase carries all the concurrency risk and is deliberately last.
   run on a development machine with no Picamera2 installed.
 - **Display-policy tests** — `select_for_display()` per program, and the
   skip-when-busy behavior, against a fake display.
-- **Refactor verification** — served dashboard HTML diffed byte-for-byte before
-  and after the Step 0 extraction.
+- **Refactor verification** — a committed fixture of the original served HTML,
+  plus a reconstruction test asserting that re-inlining the extracted static
+  files reproduces it byte-for-byte.
 - **Regression** — `SingleShot` capture-to-display latency measured against the
   current implementation on device.
 - **On-device only** — actual long-exposure timing, sensor-reported limits, and
