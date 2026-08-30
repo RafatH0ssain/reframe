@@ -46,5 +46,38 @@ class ReconstructionTests(unittest.TestCase):
         self.assertIn(SCRIPT_TAG, template)
 
 
+class RouteTests(unittest.TestCase):
+    def setUp(self):
+        from fastapi.testclient import TestClient
+        import dashboard
+        self.client = TestClient(dashboard.app)
+
+    def test_index_serves_template_without_inline_assets(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        body = response.text
+        self.assertIn(LINK_TAG.strip(), body)
+        self.assertIn(SCRIPT_TAG.strip(), body)
+        self.assertNotIn("<style>", body)
+        self.assertNotIn("--primary-color", body)
+
+    def test_static_css_is_served_byte_identical(self):
+        response = self.client.get("/static/dashboard.css")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/css", response.headers["content-type"])
+        self.assertEqual(response.content, CSS.read_bytes())
+
+    def test_static_js_is_served_byte_identical(self):
+        response = self.client.get("/static/dashboard.js")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("javascript", response.headers["content-type"])
+        self.assertEqual(response.content, JS.read_bytes())
+
+    def test_existing_api_routes_are_not_shadowed_by_static_mount(self):
+        # /static must not swallow the photo-serving routes.
+        response = self.client.get("/static/does-not-exist.css")
+        self.assertEqual(response.status_code, 404)
+
+
 if __name__ == "__main__":
     unittest.main()
