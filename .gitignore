@@ -31,3 +31,7 @@ Reframe BOM*
 __pycache__/
 *.pyc
 *.pyo
+
+# Claude Code worktrees & local state
+.claude/
+.superpowers/
