@@ -82,6 +82,19 @@ class RouteTests(unittest.TestCase):
         self.assertIn("data-recipe-id", js)
         self.assertIn("handleRecipeClick", js)
 
+    def test_recipe_ids_properly_escaped_in_attributes_and_urls(self):
+        # Security fix: recipe ids must be escaped in attribute contexts
+        # (using escapeAttr which escapes quotes) and encoded in URL paths
+        # (using encodeURIComponent).
+        js = JS.read_text(encoding="utf-8")
+        # Verify escapeAttr is used for attribute values
+        self.assertIn("function escapeAttr", js)
+        self.assertIn('data-recipe-id="${escapeAttr(recipe.id)}"', js)
+        # Verify encodeURIComponent is used in fetch URLs
+        self.assertIn("encodeURIComponent(recipeId)", js)
+        self.assertIn("/api/recipes/${encodeURIComponent(recipeId)}/activate", js)
+        self.assertIn("/api/recipes/${encodeURIComponent(recipeId)}", js)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1327,7 +1327,7 @@
                 list.innerHTML = data.items.map(recipe => {
                     const isActive = recipe.id === data.active;
                     return `
-                        <div class="recipe-item ${isActive ? 'is-active' : ''}" data-recipe-id="${escapeHtml(recipe.id)}">
+                        <div class="recipe-item ${isActive ? 'is-active' : ''}" data-recipe-id="${escapeAttr(recipe.id)}">
                             <span class="recipe-item-name">${escapeHtml(recipe.name || recipe.id)}</span>
                             <span class="recipe-item-actions">
                                 <button type="button" class="action-btn btn-secondary recipe-use-btn"
@@ -1337,6 +1337,12 @@
                             </span>
                         </div>`;
                 }).join('');
+            }
+
+            function escapeAttr(value) {
+                const div = document.createElement('div');
+                div.textContent = value;
+                return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
             }
 
             function escapeHtml(value) {
@@ -1367,7 +1373,7 @@
             }
 
             async function activateRecipe(recipeId) {
-                await sendRecipeRequest(`/api/recipes/${recipeId}/activate`, 'POST',
+                await sendRecipeRequest(`/api/recipes/${encodeURIComponent(recipeId)}/activate`, 'POST',
                     null, 'Recipe activated.');
                 // Activation rewrites the derived cache, so the form is now stale.
                 const settings = await (await fetch('/api/settings')).json();
@@ -1413,7 +1419,7 @@
                 if (!confirm('Delete this recipe?')) {
                     return;
                 }
-                await sendRecipeRequest(`/api/recipes/${recipeId}`, 'DELETE', null, 'Recipe deleted.');
+                await sendRecipeRequest(`/api/recipes/${encodeURIComponent(recipeId)}`, 'DELETE', null, 'Recipe deleted.');
             }
 
             async function sendRecipeRequest(url, method, body, successMessage) {
