@@ -130,6 +130,30 @@ class RecipeRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertIn("last", response.json()["detail"].lower())
 
+    def test_camera_rejection_rolls_back_and_returns_502(self):
+        # Override the always-succeeding fake_post from setUp with one that
+        # raises, simulating the camera refusing the reload. The rollback
+        # branch re-notifies with the same patched post and tolerates that
+        # failing too -- what matters is that the previous settings were
+        # restored to disk before the 502 was raised.
+        async def failing_post(path, json=None):
+            raise RuntimeError("camera unreachable")
+
+        original_active = self.client.get("/api/recipes").json()["active"]
+        with patch.object(dashboard.reframe_client, "post", failing_post):
+            response = self.client.post("/api/recipes/night/activate")
+        self.assertEqual(response.status_code, 502)
+        stored = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(stored["recipes"]["active"], original_active)
+
+    def test_failed_save_returns_500_not_200(self):
+        # save_settings() swallows non-validation exceptions (disk-write
+        # failures, permissions problems) and returns False. The route must
+        # not report success when nothing reached disk.
+        with patch.object(dashboard.settings_manager, "save_settings", return_value=False):
+            response = self.client.post("/api/recipes/night/activate")
+        self.assertEqual(response.status_code, 500)
+
 
 if __name__ == "__main__":
     unittest.main()
