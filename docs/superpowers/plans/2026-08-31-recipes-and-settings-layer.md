@@ -1146,9 +1146,15 @@ async def _save_recipes_section(section: Dict[str, Any]) -> None:
     """
     previous_settings = settings_manager.load_settings()
     try:
-        settings_manager.save_settings({"recipes": section})
+        success = settings_manager.save_settings({"recipes": section})
     except SettingsValidationError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+    # save_settings swallows non-validation failures (disk write, permissions)
+    # and returns False. Without this check every recipe mutation would report
+    # success while nothing reached disk. Mirrors update_settings().
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to save settings")
 
     try:
         await reframe_client.post("/settings/reload")
