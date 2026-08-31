@@ -71,6 +71,17 @@ class RouteTests(unittest.TestCase):
         self.assertIn(".recipe-list", css)
         self.assertIn(".recipe-item", css)
 
+    def test_recipe_buttons_use_event_delegation_not_inline_handlers(self):
+        # Security fix: recipe buttons must not use inline onclick handlers
+        # (which are vulnerable to id-based XSS). They must use event delegation
+        # with data attributes instead.
+        js = JS.read_text(encoding="utf-8")
+        self.assertNotIn('onclick="activateRecipe(', js)
+        self.assertNotIn('onclick="deleteRecipe(', js)
+        # Verify the structural fix is in place
+        self.assertIn("data-recipe-id", js)
+        self.assertIn("handleRecipeClick", js)
+
 
 if __name__ == "__main__":
     unittest.main()

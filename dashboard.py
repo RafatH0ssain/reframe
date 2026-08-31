@@ -11,6 +11,7 @@ import shutil
 import math
 import tempfile
 import threading
+import re
 from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
@@ -185,6 +186,8 @@ def validate_settings(settings: Dict[str, Any]) -> None:
         text(recipe.get("name"), f"{path}.name", 80)
         if not recipe.get("id"):
             raise SettingsValidationError(f"{path}.id must not be empty")
+        if not re.match(r"^[a-z0-9][a-z0-9-]*$", recipe["id"]):
+            raise SettingsValidationError(f"{path}.id must contain only lowercase letters, digits, and hyphens, and must start with a letter or digit")
         if recipe["id"] in seen_ids:
             raise SettingsValidationError(f"{path}.id duplicates an earlier recipe id")
         seen_ids.add(recipe["id"])

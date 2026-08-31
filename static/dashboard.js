@@ -1315,6 +1315,7 @@
                         throw new Error('Could not load recipes');
                     }
                     renderRecipes(await response.json());
+                    attachRecipeListeners();
                 } catch (error) {
                     console.error('Error loading recipes:', error);
                     document.getElementById('recipe-status').textContent = 'Could not load recipes.';
@@ -1326,14 +1327,12 @@
                 list.innerHTML = data.items.map(recipe => {
                     const isActive = recipe.id === data.active;
                     return `
-                        <div class="recipe-item ${isActive ? 'is-active' : ''}">
+                        <div class="recipe-item ${isActive ? 'is-active' : ''}" data-recipe-id="${escapeHtml(recipe.id)}">
                             <span class="recipe-item-name">${escapeHtml(recipe.name || recipe.id)}</span>
                             <span class="recipe-item-actions">
-                                <button type="button" class="action-btn btn-secondary"
-                                    onclick="activateRecipe('${encodeURIComponent(recipe.id)}')"
+                                <button type="button" class="action-btn btn-secondary recipe-use-btn"
                                     ${isActive ? 'disabled' : ''}>${isActive ? 'Active' : 'Use'}</button>
-                                <button type="button" class="action-btn btn-secondary"
-                                    onclick="deleteRecipe('${encodeURIComponent(recipe.id)}')"
+                                <button type="button" class="action-btn btn-secondary recipe-delete-btn"
                                     ${isActive || data.items.length <= 1 ? 'disabled' : ''}>Delete</button>
                             </span>
                         </div>`;
@@ -1344,6 +1343,27 @@
                 const div = document.createElement('div');
                 div.textContent = value;
                 return div.innerHTML;
+            }
+
+            function attachRecipeListeners() {
+                const list = document.getElementById('recipe-list');
+                if (!list) return;
+                // Remove any existing listener to avoid duplicates
+                list.removeEventListener('click', handleRecipeClick);
+                list.addEventListener('click', handleRecipeClick);
+            }
+
+            function handleRecipeClick(event) {
+                const useBtn = event.target.closest('.recipe-use-btn');
+                const deleteBtn = event.target.closest('.recipe-delete-btn');
+                const item = event.target.closest('[data-recipe-id]');
+                if (!item) return;
+                const recipeId = item.dataset.recipeId;
+                if (useBtn) {
+                    activateRecipe(recipeId);
+                } else if (deleteBtn) {
+                    deleteRecipe(recipeId);
+                }
             }
 
             async function activateRecipe(recipeId) {
