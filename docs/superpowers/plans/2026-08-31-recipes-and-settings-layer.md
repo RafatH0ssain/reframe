@@ -433,7 +433,7 @@ def resolve_active(settings):
 ./.venv/bin/python -m unittest tests.test_recipes -v
 ```
 
-Expected: 13 tests PASS.
+Expected: 15 tests PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -540,7 +540,7 @@ class SyncTests(unittest.TestCase):
 ./.venv/bin/python -m unittest tests.test_recipes -v
 ```
 
-Expected: the 13 Task 2 tests still PASS; the 8 new `SyncTests` FAIL with `AttributeError: module 'recipes' has no attribute 'apply_active_to_cache'`.
+Expected: the 15 Task 2 tests still PASS; the 8 new `SyncTests` FAIL with `AttributeError: module 'recipes' has no attribute 'apply_active_to_cache'`.
 
 - [ ] **Step 3: Implement the sync functions**
 
@@ -618,7 +618,7 @@ def sync(settings, recipes_changed):
 ./.venv/bin/python -m unittest tests.test_recipes -v
 ```
 
-Expected: 21 tests PASS.
+Expected: 23 tests PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -646,7 +646,7 @@ git commit -m "feat: sync recipes with the derived camera and processing cache"
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `tests/test_recipes.py`, above the `if __name__` block:
+Add these three imports to the TOP of `tests/test_recipes.py`, beside the existing `import copy` / `import unittest` / `import recipes` lines — not mid-file:
 
 ```python
 import json
@@ -654,8 +654,11 @@ import tempfile
 from pathlib import Path
 
 import dashboard
+```
 
+Then append the test classes above the `if __name__` block:
 
+```python
 class ValidationTests(unittest.TestCase):
     def _valid(self):
         base = {
@@ -783,7 +786,7 @@ class SettingsManagerRecipeTests(unittest.TestCase):
 ./.venv/bin/python -m unittest tests.test_recipes -v
 ```
 
-Expected: the 21 earlier tests PASS; the 12 new tests FAIL (validation does not know about recipes, and `SettingsManager` does not migrate).
+Expected: the 23 earlier tests PASS; the 12 new tests FAIL (validation does not know about recipes, and `SettingsManager` does not migrate).
 
 - [ ] **Step 3: Add the recipe validation rules**
 
@@ -906,19 +909,12 @@ import recipes
 path = Path("settings.example.json")
 settings = json.loads(path.read_text(encoding="utf-8"))
 settings = recipes.migrate_settings(settings, settings["camera"], settings["processing"])
-
-ordered = {}
-for key, value in settings.items():
-    ordered[key] = value
-    if key == "processing":
-        ordered["recipes"] = settings["recipes"]
-ordered.pop("recipes", None)
-ordered["recipes"] = settings["recipes"]
-
 path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
 print("recipes:", [r["id"] for r in settings["recipes"]["items"]])
 EOF
 ```
+
+The `recipes` key lands at the end of the file rather than beside `processing`. That is fine — JSON object order is not significant and no code depends on it.
 
 Expected: `recipes: ['standard', 'night', 'high-contrast', 'soft']`.
 
@@ -948,7 +944,7 @@ git commit -m "feat: validate recipes and make them the settings source of truth
 ### Task 5: Recipe CRUD routes
 
 **Files:**
-- Modify: `dashboard.py` — add routes next to the existing `/api/settings` routes (around line 963)
+- Modify: `dashboard.py` — add routes immediately after the existing `update_settings` route. LOCATE IT BY CONTENT, not by line number: find the `@app.post("/api/settings")` decorator and insert after that function's final `return` statement. Task 4 inserts code above this point, so any line number stated here would already be stale by the time you read it.
 - Test: `tests/test_recipe_routes.py`
 
 **Interfaces:**
