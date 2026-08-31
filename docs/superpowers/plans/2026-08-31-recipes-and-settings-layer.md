@@ -765,6 +765,20 @@ class SettingsManagerRecipeTests(unittest.TestCase):
         self.assertEqual(stored["camera"]["exposure_mode"], "manual")
         self.assertEqual(stored["processing"]["color_factor"], 1.6)
 
+    def test_constructing_against_a_missing_file_writes_usable_settings(self):
+        # Every other test writes a settings file first, so the fresh-install
+        # bootstrap path had no coverage: an empty default recipe list made
+        # _ensure_settings_file() fail silently and never create settings.json.
+        missing = Path(self.temp_dir.name) / "brand-new.json"
+        self.assertFalse(missing.exists())
+
+        manager = dashboard.SettingsManager(str(missing))
+
+        self.assertTrue(missing.exists(), "fresh install did not write settings.json")
+        stored = json.loads(missing.read_text(encoding="utf-8"))
+        self.assertGreaterEqual(len(stored["recipes"]["items"]), 1)
+        dashboard.validate_settings(stored)
+
     def test_saving_a_slider_edit_writes_through_to_the_active_recipe(self):
         manager = self._manager_with({
             "camera": copy.deepcopy(DEFAULT_CAMERA),
@@ -786,7 +800,7 @@ class SettingsManagerRecipeTests(unittest.TestCase):
 ./.venv/bin/python -m unittest tests.test_recipes -v
 ```
 
-Expected: the 23 earlier tests PASS; the 12 new tests FAIL (validation does not know about recipes, and `SettingsManager` does not migrate).
+Expected: the 23 earlier tests PASS; the 13 new tests FAIL (validation does not know about recipes, and `SettingsManager` does not migrate).
 
 - [ ] **Step 3: Add the recipe validation rules**
 
@@ -860,7 +874,16 @@ In `SettingsManager.__init__`, add a `recipes` key to `self.default_settings`, p
             },
 ```
 
-The empty list is deliberate: `_deep_merge` replaces lists wholesale, so leaving it empty means a real file's recipes always win, and `migrate_settings` fills it for files that have none.
+Then, immediately before the existing `self._ensure_settings_file()` call, populate that list from the defaults the object already holds — so there is still one source of truth and no duplicated recipe literals:
+
+```python
+        self.default_settings["recipes"]["items"] = recipes.built_in_recipes(
+            self.default_settings["camera"],
+            self.default_settings["processing"],
+        )
+```
+
+**The list must NOT be left empty.** `_deep_merge` replaces lists wholesale, so an empty default list gets merged over the migrated recipes during `_ensure_settings_file()`'s bootstrap save on a fresh install. `resolve_active` then raises `ValueError`, `save_settings`'s broad `except Exception` swallows it, and `settings.json` is silently never written. Populating the defaults still lets a real file's recipes win — list replacement works in that direction too, which is the direction that actually matters.
 
 Replace the body of `load_settings()` with:
 
