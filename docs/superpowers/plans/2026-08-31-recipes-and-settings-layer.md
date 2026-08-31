@@ -1289,6 +1289,21 @@ git commit -m "feat: add recipe CRUD and activation routes"
 - Consumes from Task 5: `GET /api/recipes`, `POST /api/recipes`, `PUT /api/recipes/{id}`, `DELETE /api/recipes/{id}`, `POST /api/recipes/{id}/activate`.
 - Produces: no interface later tasks depend on. This is the last task of Phase 1A.
 
+**SECURITY — do not interpolate recipe ids into inline event handlers.** An
+earlier revision of this plan generated buttons with
+`onclick="activateRecipe('${encodeURIComponent(recipe.id)}')"`. That is a stored
+XSS hole: `encodeURIComponent` does not escape `'`, `(`, `)`, `*`, `!`, or `~`,
+so a recipe id of `x')*(alert)('1` emits `activateRecipe('x')*(alert)('1')` —
+valid JavaScript that executes the injected call in the session of every user
+who later opens Settings. Escaping harder is the wrong fix; the id must never
+reach a JavaScript string context. Render a `data-recipe-id` attribute and use a
+single delegated listener on the list container instead, and escape that
+attribute with an attribute-context helper that also covers `"` and `'` — the
+`textContent`/`innerHTML` round-trip used for text does NOT.
+`encodeURIComponent` remains correct inside the fetch URLs, where it was never
+the problem. Recipe ids are additionally restricted server-side to
+`^[a-z0-9][a-z0-9-]*$`.
+
 **Scope discipline:** this is a functional recipe manager, not a redesign. Match the existing settings-modal markup, class names, and JS style exactly — read the surrounding code before writing. Do not restyle anything that already exists.
 
 - [ ] **Step 1: Read the existing settings modal markup and JS conventions**
