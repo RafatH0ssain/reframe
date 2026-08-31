@@ -186,7 +186,7 @@ def validate_settings(settings: Dict[str, Any]) -> None:
         text(recipe.get("name"), f"{path}.name", 80)
         if not recipe.get("id"):
             raise SettingsValidationError(f"{path}.id must not be empty")
-        if not re.match(r"^[a-z0-9][a-z0-9-]*$", recipe["id"]):
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", recipe["id"]):
             raise SettingsValidationError(f"{path}.id must contain only lowercase letters, digits, and hyphens, and must start with a letter or digit")
         if recipe["id"] in seen_ids:
             raise SettingsValidationError(f"{path}.id duplicates an earlier recipe id")
@@ -1074,6 +1074,40 @@ async def update_settings(request: Request):
 
     return {"status": "success", "message": "Settings updated successfully"}
 
+@app.post("/api/settings/reset")
+async def reset_settings():
+    """Replace settings with a fresh copy of the shipped defaults.
+
+    Unlike update_settings(), this does not merge with what's already on
+    disk -- the whole point of "reset to defaults" is that every value goes
+    back to exactly what the software ships with, including the active
+    recipe and the derived camera/processing cache (and, same as before this
+    route existed, the stored Are.na access token). A deep copy is required:
+    default_settings is a long-lived object and the recipe routes mutate
+    whatever load_settings() hands them in place.
+    """
+    previous_settings = settings_manager.load_settings()
+    defaults = copy.deepcopy(settings_manager.default_settings)
+    try:
+        settings_manager.replace_settings(defaults)
+    except SettingsValidationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    try:
+        await reframe_client.post("/settings/reload")
+    except Exception as apply_error:
+        try:
+            settings_manager.replace_settings(previous_settings)
+            await reframe_client.post("/settings/reload")
+        except Exception as rollback_error:
+            logging.error(f"Settings reset rollback failed: {rollback_error}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Camera rejected the reset settings; previous settings were restored: {apply_error}"
+        )
+
+    return {"status": "success", "message": "Settings reset to defaults"}
+
 async def _save_recipes_section(section: Dict[str, Any]) -> None:
     """Persist a recipes section and tell the camera to reload.
 
@@ -1108,6 +1142,19 @@ def _recipes_section() -> Dict[str, Any]:
     return settings_manager.load_settings()["recipes"]
 
 
+RECIPE_BODY_FIELDS = ("id", "name", "capture", "render")
+
+
+def _allowed_recipe_fields(recipe: Dict[str, Any]) -> Dict[str, Any]:
+    """Reduce an incoming recipe body to the fields recipes actually own.
+
+    An unknown top-level key would otherwise be stored verbatim -- and
+    settings.json is re-parsed on every load_settings() call, i.e. every API
+    request, so a large junk field bloats the cost of every request forever.
+    """
+    return {key: recipe[key] for key in RECIPE_BODY_FIELDS if key in recipe}
+
+
 @app.get("/api/recipes")
 async def list_recipes():
     """List all recipes and which one is active."""
@@ -1123,9 +1170,10 @@ async def create_recipe(request: Request):
         raise HTTPException(status_code=400, detail="Recipe body must be valid JSON")
     if not isinstance(recipe, dict) or not recipe.get("id"):
         raise HTTPException(status_code=400, detail="Recipe must be an object with an id")
+    recipe = _allowed_recipe_fields(recipe)
 
     section = _recipes_section()
-    if any(existing["id"] == recipe["id"] for existing in section["items"]):
+    if any(existing.get("id") == recipe["id"] for existing in section["items"]):
         raise HTTPException(status_code=409, detail=f"Recipe '{recipe['id']}' already exists")
     if len(section["items"]) >= recipes.RECIPE_LIMIT:
         raise HTTPException(
@@ -1146,10 +1194,11 @@ async def update_recipe(recipe_id: str, request: Request):
         raise HTTPException(status_code=400, detail="Recipe body must be valid JSON")
     if not isinstance(recipe, dict):
         raise HTTPException(status_code=400, detail="Recipe must be an object")
+    recipe = _allowed_recipe_fields(recipe)
 
     section = _recipes_section()
     for index, existing in enumerate(section["items"]):
-        if existing["id"] == recipe_id:
+        if existing.get("id") == recipe_id:
             recipe["id"] = recipe_id  # the URL owns identity, not the body
             section["items"][index] = recipe
             await _save_recipes_section(section)
@@ -1161,7 +1210,7 @@ async def update_recipe(recipe_id: str, request: Request):
 async def delete_recipe(recipe_id: str):
     """Delete a recipe that is neither active nor the last one."""
     section = _recipes_section()
-    if not any(existing["id"] == recipe_id for existing in section["items"]):
+    if not any(existing.get("id") == recipe_id for existing in section["items"]):
         raise HTTPException(status_code=404, detail=f"No recipe '{recipe_id}'")
     if section["active"] == recipe_id:
         raise HTTPException(
@@ -1169,7 +1218,7 @@ async def delete_recipe(recipe_id: str):
     if len(section["items"]) <= 1:
         raise HTTPException(status_code=409, detail="Cannot delete the last remaining recipe")
 
-    section["items"] = [r for r in section["items"] if r["id"] != recipe_id]
+    section["items"] = [r for r in section["items"] if r.get("id") != recipe_id]
     await _save_recipes_section(section)
     return {"status": "success", "id": recipe_id}
 
@@ -1178,7 +1227,7 @@ async def delete_recipe(recipe_id: str):
 async def activate_recipe(recipe_id: str):
     """Make a recipe active, regenerating the derived camera/processing cache."""
     section = _recipes_section()
-    if not any(existing["id"] == recipe_id for existing in section["items"]):
+    if not any(existing.get("id") == recipe_id for existing in section["items"]):
         raise HTTPException(status_code=404, detail=f"No recipe '{recipe_id}'")
 
     section["active"] = recipe_id

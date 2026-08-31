@@ -725,51 +725,17 @@
             async function resetSettings() {
                 if (confirm('Are you sure you want to reset all settings to defaults?')) {
                     try {
-                        const defaultSettings = {
-                            camera: {
-                                resolution: {width: 1200, height: 800},
-                                exposure_value: 0,
-                                sharpness: 3,
-                                autofocus_mode: 2
-                            },
-                            processing: {
-                                saturation: 0.6,
-                                brightness_factor: 1.1,
-                                color_factor: 1.4,
-                                dithering_method: "floyd_steinberg",
-                                bayer_size: 4,
-                                threshold_scale: 1.0
-                            },
-                            system: {
-                                camera_name: "",
-                                auto_refresh_interval: 30,
-                                auto_timeout_enabled: true,
-                                auto_timeout_minutes: 10,
-                                show_dashboard_qr_on_wifi_connect: true
-                            },
-                            exports: {
-                                upscale_dithered_2x: false
-                            },
-                            extensions: {
-                                arena: {
-                                    enabled: false,
-                                    channel: "",
-                                    access_token: "",
-                                    access_token_clear: true
-                                }
-                            }
-                        };
-                        
-                        const response = await fetch('/api/settings', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                            },
-                            body: JSON.stringify(defaultSettings)
+                        // The server owns the default values (including the built-in
+                        // recipe set), so the reset is delegated to it rather than
+                        // assembling a defaults payload here.
+                        const response = await fetch('/api/settings/reset', {
+                            method: 'POST'
                         });
-                        
+
                         if (response.ok) {
-                            populateSettingsForm(defaultSettings);
+                            const settings = await (await fetch('/api/settings')).json();
+                            populateSettingsForm(settings);
+                            await loadRecipes();
                             await loadExtensionActions();
                             renderGallery();
                             alert('Settings reset to defaults!');
@@ -1373,8 +1339,14 @@
             }
 
             async function activateRecipe(recipeId) {
-                await sendRecipeRequest(`/api/recipes/${encodeURIComponent(recipeId)}/activate`, 'POST',
+                const succeeded = await sendRecipeRequest(`/api/recipes/${encodeURIComponent(recipeId)}/activate`, 'POST',
                     null, 'Recipe activated.');
+                if (!succeeded) {
+                    // Failure already surfaced in recipe-status. Repopulating the
+                    // form here would wipe out any unsaved edits and disarm the
+                    // unsaved-changes guard for no reason.
+                    return;
+                }
                 // Activation rewrites the derived cache, so the form is now stale.
                 const settings = await (await fetch('/api/settings')).json();
                 populateSettingsForm(settings);
@@ -1434,13 +1406,15 @@
                     const data = await response.json().catch(() => ({}));
                     if (!response.ok) {
                         status.textContent = data.detail || 'Recipe request failed.';
-                        return;
+                        return false;
                     }
                     status.textContent = successMessage;
                     await loadRecipes();
+                    return true;
                 } catch (error) {
                     console.error('Recipe request failed:', error);
                     status.textContent = 'Recipe request failed.';
+                    return false;
                 }
             }
 

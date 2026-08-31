@@ -122,8 +122,12 @@ def migrate_settings(settings, default_camera, default_processing):
     if isinstance(existing, dict) and existing.get("items"):
         return migrated
 
-    camera = migrated.get("camera") or default_camera
-    processing = migrated.get("processing") or default_processing
+    # Default-fill per KEY, not per section: a section that exists but is
+    # missing an individual key (e.g. an old settings.json whose "processing"
+    # predates threshold_scale) must still get that key filled from defaults.
+    # The user's own values win for every key they actually have.
+    camera = {**default_camera, **(migrated.get("camera") or {})}
+    processing = {**default_processing, **(migrated.get("processing") or {})}
 
     migrated["recipes"] = {
         "active": "standard",

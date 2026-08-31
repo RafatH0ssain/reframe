@@ -392,6 +392,40 @@ class SettingsManagerRecipeTests(unittest.TestCase):
         self.assertEqual(stored["camera"]["exposure_mode"], "manual")
         self.assertEqual(stored["processing"]["color_factor"], 1.6)
 
+    def test_processing_missing_a_key_promotes_to_standard_filled_from_defaults(self):
+        # Regression test: a settings.json whose "processing" section exists
+        # but predates a key (e.g. threshold_scale) must not build a Standard
+        # recipe that omits it -- that used to 422 every settings save and
+        # every recipe route forever, naming a key the user never wrote.
+        processing = copy.deepcopy(LEGACY_PROCESSING)
+        del processing["threshold_scale"]
+        manager = self._manager_with({
+            "camera": copy.deepcopy(LEGACY_CAMERA),
+            "processing": processing,
+        })
+        loaded = manager.load_settings()
+        standard = next(r for r in loaded["recipes"]["items"] if r["id"] == "standard")
+        # The missing key is filled from the shipped default...
+        self.assertEqual(standard["render"]["threshold_scale"], DEFAULT_PROCESSING["threshold_scale"])
+        # ...but every key the user DID supply keeps the user's own value.
+        self.assertEqual(standard["render"]["saturation"], LEGACY_PROCESSING["saturation"])
+        self.assertEqual(standard["render"]["dithering_method"], LEGACY_PROCESSING["dithering_method"])
+        dashboard.validate_settings(loaded)
+
+    def test_camera_missing_a_key_promotes_to_standard_filled_from_defaults(self):
+        camera = copy.deepcopy(LEGACY_CAMERA)
+        del camera["sharpness"]
+        manager = self._manager_with({
+            "camera": camera,
+            "processing": copy.deepcopy(LEGACY_PROCESSING),
+        })
+        loaded = manager.load_settings()
+        standard = next(r for r in loaded["recipes"]["items"] if r["id"] == "standard")
+        self.assertEqual(standard["capture"]["sharpness"], DEFAULT_CAMERA["sharpness"])
+        self.assertEqual(standard["capture"]["exposure_value"], LEGACY_CAMERA["exposure_value"])
+        self.assertEqual(standard["capture"]["autofocus_mode"], LEGACY_CAMERA["autofocus_mode"])
+        dashboard.validate_settings(loaded)
+
 
 if __name__ == "__main__":
     unittest.main()

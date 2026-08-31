@@ -81,6 +81,17 @@ class RecipeRouteTests(unittest.TestCase):
         items = self.client.get("/api/recipes").json()["items"]
         self.assertEqual(next(r for r in items if r["id"] == "custom")["name"], "Renamed")
 
+    def test_create_discards_unknown_top_level_keys(self):
+        # A large unknown field would otherwise be stored verbatim and
+        # re-parsed on every load_settings() call, i.e. every API request.
+        recipe = self._new_recipe()
+        recipe["junk"] = "x" * 1000
+        response = self.client.post("/api/recipes", json=recipe)
+        self.assertEqual(response.status_code, 200)
+        stored = self.client.get("/api/recipes").json()
+        created = next(r for r in stored["items"] if r["id"] == "custom")
+        self.assertNotIn("junk", created)
+
     def test_update_404s_for_an_unknown_id(self):
         response = self.client.put("/api/recipes/ghost", json=self._new_recipe("ghost"))
         self.assertEqual(response.status_code, 404)
@@ -212,6 +223,43 @@ class RecipeRouteTests(unittest.TestCase):
         # Verify it's active
         response = self.client.get("/api/recipes")
         self.assertEqual(response.json()["active"], "my-recipe")
+
+    def test_reset_restores_built_in_recipes_and_clears_manual_exposure(self):
+        # Activate Night, then edit a slider -- which writes through into
+        # Night's render values via the cache-wins direction of sync(). A
+        # reset must undo both: the recipe set goes back to the shipped
+        # built-ins, Standard becomes active again, and the derived camera
+        # cache no longer carries Night's manual 4-second exposure.
+        self.client.post("/api/recipes/night/activate")
+        self.client.post("/api/settings", json={"processing": {"saturation": 0.01}})
+
+        response = self.client.post("/api/settings/reset")
+        self.assertEqual(response.status_code, 200)
+
+        body = self.client.get("/api/recipes").json()
+        self.assertEqual(body["active"], "standard")
+
+        default_items = self.manager.default_settings["recipes"]["items"]
+        self.assertEqual({r["id"] for r in body["items"]},
+                          {r["id"] for r in default_items})
+        night = next(r for r in body["items"] if r["id"] == "night")
+        default_night = next(r for r in default_items if r["id"] == "night")
+        self.assertEqual(night["render"], default_night["render"])
+
+        stored = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertNotEqual(stored["camera"].get("exposure_mode"), "manual")
+        self.assertNotEqual(stored["camera"].get("exposure_time_us"), 4_000_000)
+
+    def test_reset_rolls_back_when_the_camera_rejects_it(self):
+        async def failing_post(path, json=None):
+            raise RuntimeError("camera unreachable")
+
+        original_active = self.client.get("/api/recipes").json()["active"]
+        with patch.object(dashboard.reframe_client, "post", failing_post):
+            response = self.client.post("/api/settings/reset")
+        self.assertEqual(response.status_code, 502)
+        stored = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(stored["recipes"]["active"], original_active)
 
 
 if __name__ == "__main__":
