@@ -148,3 +148,68 @@ def resolve_active(settings):
         if recipe.get("id") == active_id:
             return recipe
     return items[0]
+
+
+def apply_active_to_cache(settings):
+    """Regenerate the derived camera/processing cache from the active recipe.
+
+    Only recipe keys are overwritten. Keys the recipe does not own -- notably
+    camera.resolution -- are left exactly as they were, because reframe.py
+    reads them and they are device properties rather than part of a look.
+
+    Returns a new dict; the argument is not mutated.
+    """
+    result = copy.deepcopy(settings)
+    active = resolve_active(result)
+
+    camera = result.setdefault("camera", {})
+    for key in CAPTURE_KEYS:
+        if key in active.get("capture", {}):
+            camera[key] = active["capture"][key]
+
+    processing = result.setdefault("processing", {})
+    for key in RENDER_KEYS:
+        if key in active.get("render", {}):
+            processing[key] = active["render"][key]
+
+    return result
+
+
+def write_cache_into_active(settings):
+    """Fold direct edits of camera/processing back into the active recipe.
+
+    The existing settings form edits the cache directly. Without this, the
+    selected recipe would silently drift out of agreement with what the
+    camera is actually doing.
+
+    Returns a new dict; the argument is not mutated.
+    """
+    result = copy.deepcopy(settings)
+    active = resolve_active(result)
+
+    camera = result.get("camera", {})
+    capture = active.setdefault("capture", {})
+    for key in CAPTURE_KEYS:
+        if key in camera:
+            capture[key] = camera[key]
+
+    processing = result.get("processing", {})
+    render = active.setdefault("render", {})
+    for key in RENDER_KEYS:
+        if key in processing:
+            render[key] = processing[key]
+
+    return result
+
+
+def sync(settings, recipes_changed):
+    """Reconcile recipes and the derived cache in one fixed direction.
+
+    ``recipes_changed`` says which side the incoming payload edited. Recipes
+    win when they were the thing edited; otherwise the cache wins and is
+    folded back into the active recipe. Applying both directions as competing
+    writes would make the result depend on ordering, so it never happens.
+    """
+    if recipes_changed:
+        return apply_active_to_cache(settings)
+    return apply_active_to_cache(write_cache_into_active(settings))

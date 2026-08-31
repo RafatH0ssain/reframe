@@ -154,5 +154,76 @@ class ResolveActiveTests(unittest.TestCase):
             recipes.resolve_active({"recipes": {"active": "x", "items": []}})
 
 
+class SyncTests(unittest.TestCase):
+    def _settings(self):
+        return recipes.migrate_settings(
+            {"camera": copy.deepcopy(LEGACY_CAMERA),
+             "processing": copy.deepcopy(LEGACY_PROCESSING)},
+            DEFAULT_CAMERA, DEFAULT_PROCESSING)
+
+    def test_activating_a_recipe_rewrites_the_derived_cache(self):
+        settings = self._settings()
+        settings["recipes"]["active"] = "night"
+        result = recipes.apply_active_to_cache(settings)
+
+        self.assertEqual(result["camera"]["exposure_mode"], "manual")
+        self.assertEqual(result["camera"]["exposure_time_us"], 4_000_000)
+        self.assertEqual(result["camera"]["autofocus_mode"], 0)
+        self.assertEqual(result["processing"]["color_factor"], 1.6)
+
+    def test_applying_to_cache_preserves_non_recipe_camera_keys(self):
+        # resolution is not a recipe key and must survive untouched.
+        settings = self._settings()
+        settings["recipes"]["active"] = "night"
+        result = recipes.apply_active_to_cache(settings)
+        self.assertEqual(result["camera"]["resolution"], {"width": 1200, "height": 800})
+
+    def test_editing_the_cache_writes_through_to_the_active_recipe(self):
+        settings = self._settings()
+        settings["processing"]["saturation"] = 0.25
+        settings["camera"]["sharpness"] = 9
+        result = recipes.write_cache_into_active(settings)
+
+        active = recipes.resolve_active(result)
+        self.assertEqual(active["render"]["saturation"], 0.25)
+        self.assertEqual(active["capture"]["sharpness"], 9)
+
+    def test_write_through_touches_only_the_active_recipe(self):
+        settings = self._settings()
+        settings["processing"]["saturation"] = 0.25
+        result = recipes.write_cache_into_active(settings)
+
+        night = next(r for r in result["recipes"]["items"] if r["id"] == "night")
+        self.assertEqual(night["render"]["saturation"], 0.5)
+
+    def test_sync_with_recipes_changed_lets_the_recipe_win(self):
+        settings = self._settings()
+        settings["recipes"]["active"] = "night"
+        settings["processing"]["saturation"] = 0.99  # stale cache value
+        result = recipes.sync(settings, recipes_changed=True)
+        self.assertEqual(result["processing"]["saturation"], 0.5)
+
+    def test_sync_without_recipes_changed_lets_the_cache_win(self):
+        settings = self._settings()
+        settings["processing"]["saturation"] = 0.99
+        result = recipes.sync(settings, recipes_changed=False)
+        self.assertEqual(result["processing"]["saturation"], 0.99)
+        self.assertEqual(recipes.resolve_active(result)["render"]["saturation"], 0.99)
+
+    def test_sync_is_idempotent_in_both_directions(self):
+        for changed in (True, False):
+            with self.subTest(recipes_changed=changed):
+                settings = self._settings()
+                once = recipes.sync(settings, recipes_changed=changed)
+                twice = recipes.sync(copy.deepcopy(once), recipes_changed=changed)
+                self.assertEqual(once, twice)
+
+    def test_sync_does_not_mutate_its_argument(self):
+        settings = self._settings()
+        snapshot = copy.deepcopy(settings)
+        recipes.sync(settings, recipes_changed=True)
+        self.assertEqual(settings, snapshot)
+
+
 if __name__ == "__main__":
     unittest.main()
