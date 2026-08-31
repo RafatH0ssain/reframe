@@ -260,6 +260,10 @@ class SettingsManager:
                 }
             }
         }
+        self.default_settings["recipes"]["items"] = recipes.built_in_recipes(
+            self.default_settings["camera"],
+            self.default_settings["processing"],
+        )
         self._ensure_settings_file()
     
     def _ensure_settings_file(self):

@@ -349,6 +349,20 @@ class SettingsManagerRecipeTests(unittest.TestCase):
         self.assertEqual(active["render"]["saturation"], 0.33)
         self.assertEqual(stored["processing"]["saturation"], 0.33)
 
+    def test_constructing_against_a_missing_file_writes_usable_settings(self):
+        # Every other test writes a settings file first, so the fresh-install
+        # bootstrap path had no coverage: an empty default recipe list made
+        # _ensure_settings_file() fail silently and never create settings.json.
+        missing = Path(self.temp_dir.name) / "brand-new.json"
+        self.assertFalse(missing.exists())
+
+        manager = dashboard.SettingsManager(str(missing))
+
+        self.assertTrue(missing.exists(), "fresh install did not write settings.json")
+        stored = json.loads(missing.read_text(encoding="utf-8"))
+        self.assertGreaterEqual(len(stored["recipes"]["items"]), 1)
+        dashboard.validate_settings(stored)
+
 
 if __name__ == "__main__":
     unittest.main()
