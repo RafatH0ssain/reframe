@@ -1,6 +1,10 @@
 import copy
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
+import dashboard
 import recipes
 
 LEGACY_CAMERA = {
@@ -223,6 +227,127 @@ class SyncTests(unittest.TestCase):
         snapshot = copy.deepcopy(settings)
         recipes.sync(settings, recipes_changed=True)
         self.assertEqual(settings, snapshot)
+
+
+class ValidationTests(unittest.TestCase):
+    def _valid(self):
+        base = {
+            "camera": copy.deepcopy(DEFAULT_CAMERA),
+            "processing": copy.deepcopy(DEFAULT_PROCESSING),
+            "display": {"auto_display": True, "display_timeout": 0},
+            "system": {"auto_refresh_interval": 30, "auto_timeout_minutes": 10,
+                       "auto_timeout_enabled": True,
+                       "show_dashboard_qr_on_wifi_connect": True, "camera_name": ""},
+            "exports": {"upscale_dithered_2x": False},
+            "extensions": {"arena": {"enabled": False, "channel": "", "access_token": ""}},
+        }
+        return recipes.migrate_settings(base, DEFAULT_CAMERA, DEFAULT_PROCESSING)
+
+    def test_migrated_settings_validate(self):
+        dashboard.validate_settings(self._valid())
+
+    def test_active_must_name_an_existing_recipe(self):
+        settings = self._valid()
+        settings["recipes"]["active"] = "ghost"
+        with self.assertRaises(dashboard.SettingsValidationError):
+            dashboard.validate_settings(settings)
+
+    def test_empty_recipe_list_is_rejected(self):
+        settings = self._valid()
+        settings["recipes"]["items"] = []
+        with self.assertRaises(dashboard.SettingsValidationError):
+            dashboard.validate_settings(settings)
+
+    def test_duplicate_recipe_ids_are_rejected(self):
+        settings = self._valid()
+        clone = copy.deepcopy(settings["recipes"]["items"][0])
+        settings["recipes"]["items"].append(clone)
+        with self.assertRaises(dashboard.SettingsValidationError):
+            dashboard.validate_settings(settings)
+
+    def test_exceeding_the_recipe_cap_is_rejected(self):
+        settings = self._valid()
+        base = settings["recipes"]["items"][0]
+        while len(settings["recipes"]["items"]) <= recipes.RECIPE_LIMIT:
+            extra = copy.deepcopy(base)
+            extra["id"] = f"extra-{len(settings['recipes']['items'])}"
+            settings["recipes"]["items"].append(extra)
+        with self.assertRaises(dashboard.SettingsValidationError):
+            dashboard.validate_settings(settings)
+
+    def test_bad_exposure_mode_is_rejected(self):
+        settings = self._valid()
+        settings["recipes"]["items"][0]["capture"]["exposure_mode"] = "aperture-priority"
+        with self.assertRaises(dashboard.SettingsValidationError):
+            dashboard.validate_settings(settings)
+
+    def test_out_of_range_exposure_time_is_rejected(self):
+        settings = self._valid()
+        settings["recipes"]["items"][0]["capture"]["exposure_time_us"] = 999_000_000
+        with self.assertRaises(dashboard.SettingsValidationError):
+            dashboard.validate_settings(settings)
+
+    def test_out_of_range_analogue_gain_is_rejected(self):
+        settings = self._valid()
+        settings["recipes"]["items"][0]["capture"]["analogue_gain"] = 99.0
+        with self.assertRaises(dashboard.SettingsValidationError):
+            dashboard.validate_settings(settings)
+
+    def test_render_half_is_validated_like_processing(self):
+        settings = self._valid()
+        settings["recipes"]["items"][0]["render"]["dithering_method"] = "halftone"
+        with self.assertRaises(dashboard.SettingsValidationError):
+            dashboard.validate_settings(settings)
+
+
+class SettingsManagerRecipeTests(unittest.TestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.path = Path(self.temp_dir.name) / "settings.json"
+
+    def tearDown(self):
+        self.temp_dir.cleanup()
+
+    def _manager_with(self, payload):
+        self.path.write_text(json.dumps(payload), encoding="utf-8")
+        return dashboard.SettingsManager(str(self.path))
+
+    def test_loading_a_legacy_file_migrates_it_in_memory(self):
+        manager = self._manager_with({
+            "camera": copy.deepcopy(LEGACY_CAMERA),
+            "processing": copy.deepcopy(LEGACY_PROCESSING),
+        })
+        loaded = manager.load_settings()
+        self.assertIn("recipes", loaded)
+        standard = next(r for r in loaded["recipes"]["items"] if r["id"] == "standard")
+        self.assertEqual(standard["capture"]["sharpness"], 7)
+
+    def test_saving_an_activation_rewrites_the_derived_cache(self):
+        manager = self._manager_with({
+            "camera": copy.deepcopy(DEFAULT_CAMERA),
+            "processing": copy.deepcopy(DEFAULT_PROCESSING),
+        })
+        loaded = manager.load_settings()
+        loaded["recipes"]["active"] = "night"
+        manager.save_settings({"recipes": loaded["recipes"]})
+
+        stored = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(stored["camera"]["exposure_mode"], "manual")
+        self.assertEqual(stored["processing"]["color_factor"], 1.6)
+
+    def test_saving_a_slider_edit_writes_through_to_the_active_recipe(self):
+        manager = self._manager_with({
+            "camera": copy.deepcopy(DEFAULT_CAMERA),
+            "processing": copy.deepcopy(DEFAULT_PROCESSING),
+        })
+        manager.load_settings()
+        manager.save_settings({"processing": {"saturation": 0.33}})
+
+        stored = json.loads(self.path.read_text(encoding="utf-8"))
+        active = next(r for r in stored["recipes"]["items"]
+                      if r["id"] == stored["recipes"]["active"])
+        self.assertEqual(active["render"]["saturation"], 0.33)
+        self.assertEqual(stored["processing"]["saturation"], 0.33)
 
 
 if __name__ == "__main__":

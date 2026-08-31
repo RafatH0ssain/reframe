@@ -5,6 +5,7 @@ import json
 import sys
 import logging
 import asyncio
+import copy
 import time
 import shutil
 import math
@@ -20,6 +21,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
 import httpx
 from PIL import Image
+
+import recipes
 
 CAMERA_AVAILABLE = False
 
@@ -130,6 +133,10 @@ def validate_settings(settings: Dict[str, Any]) -> None:
     number(camera.get("sharpness"), "camera.sharpness", 0, 10)
     if camera.get("autofocus_mode") not in {0, 1, 2}:
         raise SettingsValidationError("camera.autofocus_mode must be 0, 1, or 2")
+    if camera.get("exposure_mode", "auto") not in {"auto", "manual"}:
+        raise SettingsValidationError("camera.exposure_mode must be auto or manual")
+    integer(camera.get("exposure_time_us", 0), "camera.exposure_time_us", 0, 200000000)
+    number(camera.get("analogue_gain", 1.0), "camera.analogue_gain", 1.0, 16.0)
 
     processing = section(settings, "processing", "processing")
     number(processing.get("saturation"), "processing.saturation", 0, 2)
@@ -161,6 +168,52 @@ def validate_settings(settings: Dict[str, Any]) -> None:
     text(arena.get("channel", ""), "extensions.arena.channel", 200)
     text(arena.get("access_token", ""), "extensions.arena.access_token", 4096)
 
+    recipes_section = section(settings, "recipes", "recipes")
+    items = recipes_section.get("items")
+    if not isinstance(items, list) or not items:
+        raise SettingsValidationError("recipes.items must be a non-empty list")
+    if len(items) > recipes.RECIPE_LIMIT:
+        raise SettingsValidationError(
+            f"recipes.items must contain {recipes.RECIPE_LIMIT} recipes or fewer")
+
+    seen_ids = set()
+    for index, recipe in enumerate(items):
+        path = f"recipes.items[{index}]"
+        if not isinstance(recipe, dict):
+            raise SettingsValidationError(f"{path} must be an object")
+        text(recipe.get("id"), f"{path}.id", 64)
+        text(recipe.get("name"), f"{path}.name", 80)
+        if not recipe.get("id"):
+            raise SettingsValidationError(f"{path}.id must not be empty")
+        if recipe["id"] in seen_ids:
+            raise SettingsValidationError(f"{path}.id duplicates an earlier recipe id")
+        seen_ids.add(recipe["id"])
+
+        capture = section(recipe, "capture", f"{path}.capture")
+        if capture.get("exposure_mode") not in {"auto", "manual"}:
+            raise SettingsValidationError(f"{path}.capture.exposure_mode must be auto or manual")
+        # Provisional bounds. Phase 1B replaces these with sensor-reported
+        # limits read from picam2.camera_controls.
+        integer(capture.get("exposure_time_us"), f"{path}.capture.exposure_time_us", 0, 200000000)
+        number(capture.get("analogue_gain"), f"{path}.capture.analogue_gain", 1.0, 16.0)
+        number(capture.get("exposure_value"), f"{path}.capture.exposure_value", -2, 2)
+        number(capture.get("sharpness"), f"{path}.capture.sharpness", 0, 10)
+        if capture.get("autofocus_mode") not in {0, 1, 2}:
+            raise SettingsValidationError(f"{path}.capture.autofocus_mode must be 0, 1, or 2")
+
+        render = section(recipe, "render", f"{path}.render")
+        number(render.get("saturation"), f"{path}.render.saturation", 0, 2)
+        number(render.get("brightness_factor"), f"{path}.render.brightness_factor", 0.1, 3)
+        number(render.get("color_factor"), f"{path}.render.color_factor", 0.1, 3)
+        if render.get("dithering_method") not in {"floyd_steinberg", "ordered"}:
+            raise SettingsValidationError(f"{path}.render.dithering_method is unsupported")
+        if render.get("bayer_size") not in {2, 4, 8}:
+            raise SettingsValidationError(f"{path}.render.bayer_size must be 2, 4, or 8")
+        number(render.get("threshold_scale"), f"{path}.render.threshold_scale", 0.1, 2)
+
+    if recipes_section.get("active") not in seen_ids:
+        raise SettingsValidationError("recipes.active must name an existing recipe id")
+
 class SettingsManager:
     """Manages settings operations for the dashboard."""
     
@@ -180,6 +233,10 @@ class SettingsManager:
                 "dithering_method": "floyd_steinberg",
                 "bayer_size": 4,
                 "threshold_scale": 1.0
+            },
+            "recipes": {
+                "active": "standard",
+                "items": []
             },
             "display": {
                 "auto_display": True,
@@ -211,14 +268,22 @@ class SettingsManager:
             self.save_settings(self.default_settings)
     
     def load_settings(self) -> Dict[str, Any]:
-        """Load settings from JSON file."""
+        """Load settings from JSON file, migrating pre-recipe files in memory."""
         try:
             with open(self.settings_path, 'r') as f:
                 settings = json.load(f)
-            # Ensure all default keys exist
-            return self._merge_with_defaults(settings)
         except (FileNotFoundError, json.JSONDecodeError):
-            return self.default_settings.copy()
+            settings = copy.deepcopy(self.default_settings)
+
+        # Migrate BEFORE merging with defaults: the migration needs to see
+        # whether the file itself had recipes, and must promote the user's own
+        # camera/processing values into Standard rather than the shipped ones.
+        settings = recipes.migrate_settings(
+            settings,
+            self.default_settings["camera"],
+            self.default_settings["processing"],
+        )
+        return self._merge_with_defaults(settings)
 
     def load_public_settings(self) -> Dict[str, Any]:
         """Load settings safe to return to the browser."""
@@ -238,6 +303,10 @@ class SettingsManager:
             current_settings = self.load_settings()
             settings = self._prepare_settings_for_save(current_settings, settings)
             merged_settings = self._deep_merge(current_settings, settings)
+            merged_settings = recipes.sync(
+                merged_settings,
+                recipes_changed="recipes" in settings,
+            )
             validate_settings(merged_settings)
             self._write_settings(merged_settings)
             return True
