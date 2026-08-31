@@ -63,6 +63,20 @@
                 </div>
                 
                 <div class="settings-grid">
+                <div class="settings-section">
+                    <h3>recipes</h3>
+                    <p class="settings-hint">A recipe bundles capture and render settings. The active recipe drives every photo.</p>
+                    <div id="recipe-list" class="recipe-list"></div>
+                    <div class="setting-group">
+                        <label for="recipe-name">recipe name</label>
+                        <input type="text" id="recipe-name" class="setting-input" maxlength="80" placeholder="My recipe">
+                    </div>
+                    <div class="setting-group">
+                        <button type="button" id="recipe-save-btn" class="action-btn btn-primary" onclick="saveRecipe()">Save current settings as recipe</button>
+                    </div>
+                    <p id="recipe-status" class="settings-hint"></p>
+                </div>
+
                 <div class="settings-section settings-camera">
                     <h3>camera settings</h3>
                     <div class="setting-group disabled-setting">

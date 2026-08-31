@@ -633,3 +633,34 @@
                     margin-top: 8px;
                 }
             }
+
+            .recipe-list {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                margin-bottom: 12px;
+            }
+
+            .recipe-item {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+                padding: 8px 10px;
+                border: 1px dotted var(--panel-border-color);
+                background: var(--tertiary-color);
+            }
+
+            .recipe-item.is-active {
+                border-style: solid;
+            }
+
+            .recipe-item-name {
+                flex: 1;
+                text-align: left;
+            }
+
+            .recipe-item-actions {
+                display: flex;
+                gap: 6px;
+            }

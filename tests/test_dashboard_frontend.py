@@ -52,6 +52,25 @@ class RouteTests(unittest.TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertIn("no-cache", response.headers.get("cache-control", ""))
 
+    def test_settings_page_exposes_the_recipe_manager(self):
+        body = self.client.get("/").text
+        self.assertIn('id="recipe-list"', body)
+        self.assertIn('id="recipe-name"', body)
+        self.assertIn('id="recipe-save-btn"', body)
+
+    def test_frontend_javascript_talks_to_the_recipe_api(self):
+        js = JS.read_text(encoding="utf-8")
+        self.assertIn("/api/recipes", js)
+        self.assertIn("function loadRecipes", js)
+        self.assertIn("function activateRecipe", js)
+        self.assertIn("function saveRecipe", js)
+        self.assertIn("function deleteRecipe", js)
+
+    def test_recipe_styles_are_present(self):
+        css = CSS.read_text(encoding="utf-8")
+        self.assertIn(".recipe-list", css)
+        self.assertIn(".recipe-item", css)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -474,6 +474,7 @@
                     const response = await fetch('/api/settings');
                     const settings = await response.json();
                     populateSettingsForm(settings);
+                    loadRecipes();
                     document.getElementById('settings-modal').style.display = 'block';
                     lockSettingsPageScroll();
                 } catch (error) {
@@ -1307,6 +1308,116 @@
                 }
             }
             
+            async function loadRecipes() {
+                try {
+                    const response = await fetch('/api/recipes');
+                    if (!response.ok) {
+                        throw new Error('Could not load recipes');
+                    }
+                    renderRecipes(await response.json());
+                } catch (error) {
+                    console.error('Error loading recipes:', error);
+                    document.getElementById('recipe-status').textContent = 'Could not load recipes.';
+                }
+            }
+
+            function renderRecipes(data) {
+                const list = document.getElementById('recipe-list');
+                list.innerHTML = data.items.map(recipe => {
+                    const isActive = recipe.id === data.active;
+                    return `
+                        <div class="recipe-item ${isActive ? 'is-active' : ''}">
+                            <span class="recipe-item-name">${escapeHtml(recipe.name || recipe.id)}</span>
+                            <span class="recipe-item-actions">
+                                <button type="button" class="action-btn btn-secondary"
+                                    onclick="activateRecipe('${encodeURIComponent(recipe.id)}')"
+                                    ${isActive ? 'disabled' : ''}>${isActive ? 'Active' : 'Use'}</button>
+                                <button type="button" class="action-btn btn-secondary"
+                                    onclick="deleteRecipe('${encodeURIComponent(recipe.id)}')"
+                                    ${isActive || data.items.length <= 1 ? 'disabled' : ''}>Delete</button>
+                            </span>
+                        </div>`;
+                }).join('');
+            }
+
+            function escapeHtml(value) {
+                const div = document.createElement('div');
+                div.textContent = value;
+                return div.innerHTML;
+            }
+
+            async function activateRecipe(recipeId) {
+                await sendRecipeRequest(`/api/recipes/${recipeId}/activate`, 'POST',
+                    null, 'Recipe activated.');
+                // Activation rewrites the derived cache, so the form is now stale.
+                const settings = await (await fetch('/api/settings')).json();
+                populateSettingsForm(settings);
+            }
+
+            async function saveRecipe() {
+                const name = document.getElementById('recipe-name').value.trim();
+                if (!name) {
+                    document.getElementById('recipe-status').textContent = 'Give the recipe a name first.';
+                    return;
+                }
+                const settings = await (await fetch('/api/settings')).json();
+                const recipe = {
+                    id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
+                    name: name,
+                    capture: {
+                        exposure_mode: settings.camera.exposure_mode || 'auto',
+                        exposure_time_us: settings.camera.exposure_time_us || 0,
+                        analogue_gain: settings.camera.analogue_gain || 1.0,
+                        exposure_value: Number(document.getElementById('exposure-value').value),
+                        sharpness: Number(document.getElementById('sharpness').value),
+                        autofocus_mode: Number(document.getElementById('autofocus-mode').value)
+                    },
+                    render: {
+                        saturation: Number(document.getElementById('saturation').value),
+                        brightness_factor: Number(document.getElementById('brightness-factor').value),
+                        color_factor: Number(document.getElementById('color-factor').value),
+                        dithering_method: document.getElementById('dithering-method').value,
+                        bayer_size: Number(document.getElementById('bayer-size').value),
+                        threshold_scale: Number(document.getElementById('threshold-scale').value)
+                    }
+                };
+                if (!recipe.id) {
+                    document.getElementById('recipe-status').textContent = 'That name has no usable characters.';
+                    return;
+                }
+                await sendRecipeRequest('/api/recipes', 'POST', recipe, 'Recipe saved.');
+                document.getElementById('recipe-name').value = '';
+            }
+
+            async function deleteRecipe(recipeId) {
+                if (!confirm('Delete this recipe?')) {
+                    return;
+                }
+                await sendRecipeRequest(`/api/recipes/${recipeId}`, 'DELETE', null, 'Recipe deleted.');
+            }
+
+            async function sendRecipeRequest(url, method, body, successMessage) {
+                const status = document.getElementById('recipe-status');
+                try {
+                    const options = { method: method };
+                    if (body) {
+                        options.headers = { 'Content-Type': 'application/json' };
+                        options.body = JSON.stringify(body);
+                    }
+                    const response = await fetch(url, options);
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        status.textContent = data.detail || 'Recipe request failed.';
+                        return;
+                    }
+                    status.textContent = successMessage;
+                    await loadRecipes();
+                } catch (error) {
+                    console.error('Recipe request failed:', error);
+                    status.textContent = 'Recipe request failed.';
+                }
+            }
+
             // Close modal when clicking outside of it
             window.onclick = function(event) {
                 const modal = document.getElementById('settings-modal');
