@@ -1071,6 +1071,114 @@ async def update_settings(request: Request):
 
     return {"status": "success", "message": "Settings updated successfully"}
 
+async def _save_recipes_section(section: Dict[str, Any]) -> None:
+    """Persist a recipes section and tell the camera to reload.
+
+    Mirrors update_settings()'s rollback contract: if the camera rejects the
+    new settings, the previous ones are restored so the device is never left
+    running configuration the dashboard has already forgotten.
+    """
+    previous_settings = settings_manager.load_settings()
+    try:
+        settings_manager.save_settings({"recipes": section})
+    except SettingsValidationError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    try:
+        await reframe_client.post("/settings/reload")
+    except Exception as apply_error:
+        try:
+            settings_manager.replace_settings(previous_settings)
+            await reframe_client.post("/settings/reload")
+        except Exception as rollback_error:
+            logging.error(f"Recipe rollback failed: {rollback_error}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Camera rejected the recipe; previous settings were restored: {apply_error}"
+        )
+
+
+def _recipes_section() -> Dict[str, Any]:
+    return settings_manager.load_settings()["recipes"]
+
+
+@app.get("/api/recipes")
+async def list_recipes():
+    """List all recipes and which one is active."""
+    return _recipes_section()
+
+
+@app.post("/api/recipes")
+async def create_recipe(request: Request):
+    """Add a new recipe."""
+    try:
+        recipe = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Recipe body must be valid JSON")
+    if not isinstance(recipe, dict) or not recipe.get("id"):
+        raise HTTPException(status_code=400, detail="Recipe must be an object with an id")
+
+    section = _recipes_section()
+    if any(existing["id"] == recipe["id"] for existing in section["items"]):
+        raise HTTPException(status_code=409, detail=f"Recipe '{recipe['id']}' already exists")
+    if len(section["items"]) >= recipes.RECIPE_LIMIT:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Recipe limit of {recipes.RECIPE_LIMIT} reached; delete one first")
+
+    section["items"].append(recipe)
+    await _save_recipes_section(section)
+    return {"status": "success", "id": recipe["id"]}
+
+
+@app.put("/api/recipes/{recipe_id}")
+async def update_recipe(recipe_id: str, request: Request):
+    """Replace an existing recipe."""
+    try:
+        recipe = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Recipe body must be valid JSON")
+    if not isinstance(recipe, dict):
+        raise HTTPException(status_code=400, detail="Recipe must be an object")
+
+    section = _recipes_section()
+    for index, existing in enumerate(section["items"]):
+        if existing["id"] == recipe_id:
+            recipe["id"] = recipe_id  # the URL owns identity, not the body
+            section["items"][index] = recipe
+            await _save_recipes_section(section)
+            return {"status": "success", "id": recipe_id}
+    raise HTTPException(status_code=404, detail=f"No recipe '{recipe_id}'")
+
+
+@app.delete("/api/recipes/{recipe_id}")
+async def delete_recipe(recipe_id: str):
+    """Delete a recipe that is neither active nor the last one."""
+    section = _recipes_section()
+    if not any(existing["id"] == recipe_id for existing in section["items"]):
+        raise HTTPException(status_code=404, detail=f"No recipe '{recipe_id}'")
+    if section["active"] == recipe_id:
+        raise HTTPException(
+            status_code=409, detail="Cannot delete the active recipe; activate another first")
+    if len(section["items"]) <= 1:
+        raise HTTPException(status_code=409, detail="Cannot delete the last remaining recipe")
+
+    section["items"] = [r for r in section["items"] if r["id"] != recipe_id]
+    await _save_recipes_section(section)
+    return {"status": "success", "id": recipe_id}
+
+
+@app.post("/api/recipes/{recipe_id}/activate")
+async def activate_recipe(recipe_id: str):
+    """Make a recipe active, regenerating the derived camera/processing cache."""
+    section = _recipes_section()
+    if not any(existing["id"] == recipe_id for existing in section["items"]):
+        raise HTTPException(status_code=404, detail=f"No recipe '{recipe_id}'")
+
+    section["active"] = recipe_id
+    await _save_recipes_section(section)
+    return {"status": "success", "active": recipe_id}
+
 @app.get("/api/update/status")
 async def update_status():
     """Check whether the git checkout has a fast-forward update available."""
