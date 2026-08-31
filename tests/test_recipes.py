@@ -363,6 +363,35 @@ class SettingsManagerRecipeTests(unittest.TestCase):
         self.assertGreaterEqual(len(stored["recipes"]["items"]), 1)
         dashboard.validate_settings(stored)
 
+    def test_saving_an_empty_recipe_list_raises_a_validation_error(self):
+        # recipes.sync() runs before the second validate_settings() call and
+        # would otherwise raise a raw ValueError from resolve_active() for
+        # this exact payload, bypassing the friendly message written for it.
+        manager = self._manager_with({
+            "camera": copy.deepcopy(DEFAULT_CAMERA),
+            "processing": copy.deepcopy(DEFAULT_PROCESSING),
+        })
+        manager.load_settings()
+        with self.assertRaises(dashboard.SettingsValidationError) as ctx:
+            manager.save_settings({"recipes": {"active": "standard", "items": []}})
+        self.assertIn("recipes.items", str(ctx.exception))
+
+    def test_saving_a_valid_activation_still_succeeds(self):
+        # Guards against the earlier validate_settings() call rejecting a
+        # legitimate payload before recipes.sync() has a chance to run.
+        manager = self._manager_with({
+            "camera": copy.deepcopy(DEFAULT_CAMERA),
+            "processing": copy.deepcopy(DEFAULT_PROCESSING),
+        })
+        loaded = manager.load_settings()
+        loaded["recipes"]["active"] = "night"
+        self.assertTrue(manager.save_settings({"recipes": loaded["recipes"]}))
+
+        stored = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(stored["recipes"]["active"], "night")
+        self.assertEqual(stored["camera"]["exposure_mode"], "manual")
+        self.assertEqual(stored["processing"]["color_factor"], 1.6)
+
 
 if __name__ == "__main__":
     unittest.main()

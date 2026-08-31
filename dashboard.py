@@ -307,6 +307,7 @@ class SettingsManager:
             current_settings = self.load_settings()
             settings = self._prepare_settings_for_save(current_settings, settings)
             merged_settings = self._deep_merge(current_settings, settings)
+            validate_settings(merged_settings)
             merged_settings = recipes.sync(
                 merged_settings,
                 recipes_changed="recipes" in settings,
