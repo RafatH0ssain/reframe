@@ -664,3 +664,11 @@
                 display: flex;
                 gap: 6px;
             }
+
+            .manual-exposure-field {
+                display: none;
+            }
+
+            .manual-exposure-field.is-visible {
+                display: block;
+            }

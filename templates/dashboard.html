@@ -68,6 +68,29 @@
                     <p class="settings-hint">A recipe bundles capture and render settings. The active recipe drives every photo.</p>
                     <div id="recipe-list" class="recipe-list"></div>
                     <div class="setting-group">
+                        <div>
+                            <span class="setting-label">exposure</span>
+                            <select id="recipe-exposure-mode" class="setting-input" onchange="toggleManualExposureFields()">
+                                <option value="auto">auto</option>
+                                <option value="manual">manual</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="setting-group manual-exposure-field">
+                        <div>
+                            <span class="setting-label">shutter (seconds)</span>
+                            <input type="number" id="recipe-exposure-time" class="setting-input" step="0.1" min="0" value="0">
+                            <div class="setting-help" id="recipe-exposure-time-range"></div>
+                        </div>
+                    </div>
+                    <div class="setting-group manual-exposure-field">
+                        <div>
+                            <span class="setting-label">ISO gain</span>
+                            <input type="number" id="recipe-analogue-gain" class="setting-input" step="0.1" min="1" value="1">
+                            <div class="setting-help" id="recipe-analogue-gain-range"></div>
+                        </div>
+                    </div>
+                    <div class="setting-group">
                         <label for="recipe-name">recipe name</label>
                         <input type="text" id="recipe-name" class="setting-input" maxlength="80" placeholder="My recipe">
                     </div>

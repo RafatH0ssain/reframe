@@ -475,6 +475,8 @@
                     const settings = await response.json();
                     populateSettingsForm(settings);
                     loadRecipes();
+                    await loadCameraLimits();
+                    toggleManualExposureFields();
                     document.getElementById('settings-modal').style.display = 'block';
                     lockSettingsPageScroll();
                 } catch (error) {
@@ -1363,9 +1365,10 @@
                     id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
                     name: name,
                     capture: {
-                        exposure_mode: settings.camera.exposure_mode || 'auto',
-                        exposure_time_us: settings.camera.exposure_time_us || 0,
-                        analogue_gain: settings.camera.analogue_gain || 1.0,
+                        exposure_mode: document.getElementById('recipe-exposure-mode').value,
+                        exposure_time_us: Math.round(
+                            Number(document.getElementById('recipe-exposure-time').value) * 1000000),
+                        analogue_gain: Number(document.getElementById('recipe-analogue-gain').value),
                         exposure_value: Number(document.getElementById('exposure-value').value),
                         sharpness: Number(document.getElementById('sharpness').value),
                         autofocus_mode: Number(document.getElementById('autofocus-mode').value)
@@ -1385,6 +1388,52 @@
                 }
                 await sendRecipeRequest('/api/recipes', 'POST', recipe, 'Recipe saved.');
                 document.getElementById('recipe-name').value = '';
+            }
+
+            let cameraLimits = null;
+
+            async function loadCameraLimits() {
+                try {
+                    const response = await fetch('/api/camera/limits');
+                    if (!response.ok) {
+                        // Camera process may be down; leave the inputs unbounded
+                        // rather than inventing limits we cannot verify.
+                        return;
+                    }
+                    cameraLimits = await response.json();
+                    applyCameraLimits();
+                } catch (error) {
+                    console.error('Could not load camera limits:', error);
+                }
+            }
+
+            function applyCameraLimits() {
+                if (!cameraLimits) {
+                    return;
+                }
+                const exposure = cameraLimits.exposure_time_us;
+                const gain = cameraLimits.analogue_gain;
+
+                const exposureInput = document.getElementById('recipe-exposure-time');
+                const minSeconds = exposure.min / 1000000;
+                const maxSeconds = exposure.max / 1000000;
+                exposureInput.min = minSeconds.toFixed(4);
+                exposureInput.max = maxSeconds.toFixed(1);
+                document.getElementById('recipe-exposure-time-range').textContent =
+                    `sensor supports ${minSeconds.toFixed(4)}s to ${maxSeconds.toFixed(1)}s`;
+
+                const gainInput = document.getElementById('recipe-analogue-gain');
+                gainInput.min = gain.min;
+                gainInput.max = gain.max;
+                document.getElementById('recipe-analogue-gain-range').textContent =
+                    `sensor supports ${gain.min}x to ${gain.max}x`;
+            }
+
+            function toggleManualExposureFields() {
+                const manual = document.getElementById('recipe-exposure-mode').value === 'manual';
+                document.querySelectorAll('.manual-exposure-field').forEach(field => {
+                    field.classList.toggle('is-visible', manual);
+                });
             }
 
             async function deleteRecipe(recipeId) {

@@ -95,6 +95,22 @@ class RouteTests(unittest.TestCase):
         self.assertIn("/api/recipes/${encodeURIComponent(recipeId)}/activate", js)
         self.assertIn("/api/recipes/${encodeURIComponent(recipeId)}", js)
 
+    def test_recipe_editor_exposes_manual_exposure_fields(self):
+        body = self.client.get("/").text
+        self.assertIn('id="recipe-exposure-mode"', body)
+        self.assertIn('id="recipe-exposure-time"', body)
+        self.assertIn('id="recipe-analogue-gain"', body)
+
+    def test_frontend_bounds_exposure_inputs_from_reported_sensor_limits(self):
+        js = JS.read_text(encoding="utf-8")
+        self.assertIn("/api/camera/limits", js)
+        self.assertIn("function loadCameraLimits", js)
+        self.assertIn("function applyCameraLimits", js)
+
+    def test_manual_fields_are_hidden_in_auto_mode(self):
+        js = JS.read_text(encoding="utf-8")
+        self.assertIn("function toggleManualExposureFields", js)
+
 
 if __name__ == "__main__":
     unittest.main()
