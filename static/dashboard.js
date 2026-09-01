@@ -540,7 +540,11 @@
                 document.getElementById('exposure-value').value = settings.camera.exposure_value;
                 document.getElementById('sharpness').value = settings.camera.sharpness;
                 document.getElementById('autofocus-mode').value = settings.camera.autofocus_mode;
-                
+                document.getElementById('recipe-exposure-mode').value = settings.camera.exposure_mode || 'auto';
+                document.getElementById('recipe-exposure-time').value = (settings.camera.exposure_time_us || 0) / 1000000;
+                document.getElementById('recipe-analogue-gain').value = settings.camera.analogue_gain || 1.0;
+                toggleManualExposureFields();
+
                 // Processing settings
                 document.getElementById('saturation').value = settings.processing.saturation;
                 document.getElementById('brightness-factor').value = settings.processing.brightness_factor;
@@ -1360,7 +1364,6 @@
                     document.getElementById('recipe-status').textContent = 'Give the recipe a name first.';
                     return;
                 }
-                const settings = await (await fetch('/api/settings')).json();
                 const recipe = {
                     id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''),
                     name: name,
@@ -1392,6 +1395,18 @@
 
             let cameraLimits = null;
 
+            // Bounded by the dashboard's own HTTP timeout (30s), not by the
+            // sensor: a capture longer than that makes the dashboard report
+            // failure while the photo is taken and displayed anyway.
+            const MAX_ADVERTISED_EXPOSURE_SECONDS = 20;
+
+            // Floor, not round: toFixed(1) rounds to nearest, which can
+            // advertise a max (e.g. 11.8s for a true 11.767s ceiling) that is
+            // not actually achievable.
+            function flooredSecondsLabel(seconds) {
+                return (Math.floor(seconds * 10) / 10).toFixed(1);
+            }
+
             async function loadCameraLimits() {
                 try {
                     const response = await fetch('/api/camera/limits');
@@ -1416,11 +1431,11 @@
 
                 const exposureInput = document.getElementById('recipe-exposure-time');
                 const minSeconds = exposure.min / 1000000;
-                const maxSeconds = exposure.max / 1000000;
+                const maxSeconds = Math.min(exposure.max / 1000000, MAX_ADVERTISED_EXPOSURE_SECONDS);
                 exposureInput.min = minSeconds.toFixed(4);
-                exposureInput.max = maxSeconds.toFixed(1);
+                exposureInput.max = flooredSecondsLabel(maxSeconds);
                 document.getElementById('recipe-exposure-time-range').textContent =
-                    `sensor supports ${minSeconds.toFixed(4)}s to ${maxSeconds.toFixed(1)}s`;
+                    `sensor supports ${minSeconds.toFixed(4)}s to ${flooredSecondsLabel(maxSeconds)}s`;
 
                 const gainInput = document.getElementById('recipe-analogue-gain');
                 gainInput.min = gain.min;

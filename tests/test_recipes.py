@@ -299,6 +299,22 @@ class ValidationTests(unittest.TestCase):
         with self.assertRaises(dashboard.SettingsValidationError):
             dashboard.validate_settings(settings)
 
+    def test_manual_recipe_with_zero_exposure_time_is_rejected(self):
+        # Number("") === 0 in the frontend, so clearing the shutter field
+        # yields exactly this: a recipe saved as manual with exposure_time_us
+        # 0, which then shoots auto forever with no visible error.
+        settings = self._valid()
+        settings["recipes"]["items"][0]["capture"]["exposure_mode"] = "manual"
+        settings["recipes"]["items"][0]["capture"]["exposure_time_us"] = 0
+        with self.assertRaises(dashboard.SettingsValidationError):
+            dashboard.validate_settings(settings)
+
+    def test_manual_recipe_with_positive_exposure_time_is_accepted(self):
+        settings = self._valid()
+        settings["recipes"]["items"][0]["capture"]["exposure_mode"] = "manual"
+        settings["recipes"]["items"][0]["capture"]["exposure_time_us"] = 4_000_000
+        dashboard.validate_settings(settings)
+
 
 class SettingsManagerRecipeTests(unittest.TestCase):
     def setUp(self):

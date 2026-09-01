@@ -6,6 +6,7 @@ import json
 import subprocess
 import logging
 import socket
+import copy
 from time import sleep
 
 # Lazy-loaded by _lazy_import_pil() on first use
@@ -263,13 +264,32 @@ class CameraManager:
             self.sensor_limits = camera_controls.read_sensor_limits(self.picam2.camera_controls)
         except Exception as e:
             logging.warning("Could not read sensor limits, using defaults: %s", e)
-            self.sensor_limits = camera_controls.DEFAULT_SENSOR_LIMITS
+            self.sensor_limits = copy.deepcopy(camera_controls.DEFAULT_SENSOR_LIMITS)
 
-        logging.info("Sensor limits: %s", camera_controls.describe_limits(self.sensor_limits))
+        logging.info("Sensor limits (pre-configure): %s", camera_controls.describe_limits(self.sensor_limits))
 
         self.last_activity_monotonic = time.monotonic()
         self._has_captured = False  # Track if we've taken at least one photo (for adaptive AF)
-        self.configure_camera()
+
+        # fast_mode=True: this is always the configure that precedes the
+        # startup capture (fast_mode=True, per main()). Configuring with the
+        # real recipe here would bake a long manual exposure into the still
+        # configuration before we even know a capture is coming, which is
+        # exactly what turns a 60-second Night recipe into a systemd restart
+        # loop (Type=notify, TimeoutStartSec=45, Restart=always).
+        self.configure_camera(fast_mode=True)
+
+        # picam2.camera_controls is mode-dependent: it was read above before
+        # configure_camera() selected the still mode, so on some sensors it
+        # describes the wrong mode entirely (this is the realistic mechanism
+        # behind the FrameDurationLimits bug above). Re-read now and log both
+        # so a first boot shows whether they differ.
+        try:
+            self.sensor_limits = camera_controls.read_sensor_limits(self.picam2.camera_controls)
+        except Exception as e:
+            logging.warning("Could not re-read sensor limits after configure, keeping prior values: %s", e)
+
+        logging.info("Sensor limits (post-configure): %s", camera_controls.describe_limits(self.sensor_limits))
 
     def load_settings(self):
         """Load camera settings from JSON file."""
@@ -389,8 +409,13 @@ class CameraManager:
             }, None
 
 
-    def configure_camera(self):
-        """Configure the camera settings."""
+    def configure_camera(self, fast_mode=False):
+        """Configure the camera settings.
+
+        fast_mode forces auto exposure regardless of the active recipe -- see
+        the call from __init__, which is always the configure that precedes
+        the startup capture.
+        """
         camera_settings = self.settings.get("camera", {})
         resolution = camera_settings.get("resolution", {"width": 1200, "height": 800})
 
@@ -404,9 +429,13 @@ class CameraManager:
             main={"size": (resolution["width"], resolution["height"])}
         )
 
-        # Build controls dictionary from settings
-        controls = camera_controls.build_controls(camera_settings, self.sensor_limits)
-
+        # Build controls dictionary from settings. AfMode is deliberately
+        # excluded here and set separately below, in its own try/except: a
+        # sensor without autofocus must not make this configure() call raise
+        # and fall into the basic_config except-branch below, which would
+        # silently drop ExposureValue/Sharpness (and manual exposure) too.
+        controls = camera_controls.build_controls(
+            camera_settings, self.sensor_limits, fast_mode=fast_mode, include_autofocus=False)
 
         camera_config["controls"] = controls
 
@@ -489,6 +518,8 @@ class CameraManager:
         camera_settings = self.settings.get("camera", {})
         delay = camera_controls.autofocus_settle_seconds(
             camera_settings, self._has_captured, fast_mode)
+        logging.info("Autofocus settle: %.1fs (fast_mode=%s, has_captured=%s)",
+                     delay, fast_mode, self._has_captured)
         if delay:
             sleep(delay)
         self._has_captured = True
@@ -1843,10 +1874,19 @@ def main():
                         # invisible captures with no visual feedback
                         if camera_system.eink_display.is_busy():
                             logging.info(f"Short press detected ({press_duration:.1f}s) - display busy, ignoring")
+                        elif not _operation_lock.acquire(blocking=False):
+                            # Collision 3c: a blocking acquire here would let an
+                            # impatient press queue up behind a long exposure and
+                            # fire the moment the lock releases -- an unwanted
+                            # photo plus an unwanted 20-second panel refresh. Drop
+                            # the press instead.
+                            logging.info(f"Short press detected ({press_duration:.1f}s) - operation in progress, dropping press")
                         else:
-                            logging.info(f"Short press detected ({press_duration:.1f}s) - capturing photo...")
-                            with _operation_lock:
+                            try:
+                                logging.info(f"Short press detected ({press_duration:.1f}s) - capturing photo...")
                                 result = camera_system.capture_photo_api()
+                            finally:
+                                _operation_lock.release()
                             if result.get("success"):
                                 logging.info("Photo captured%s.", " and sent to display" if camera_system.camera_manager.settings.get("display", {}).get("auto_display", True) else "")
                             else:

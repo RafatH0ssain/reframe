@@ -1,3 +1,4 @@
+import logging
 import unittest
 
 import camera_controls
@@ -6,6 +7,14 @@ LIMITS = {
     "exposure_time_us": {"min": 100, "max": 112_000_000, "default": 20_000},
     "analogue_gain": {"min": 1.0, "max": 16.0, "default": 1.0},
     "frame_duration_us": {"min": 100, "max": 112_000_000},
+}
+
+# A sensor whose FrameDurationLimits was read while still in preview mode:
+# a realistic, narrow ceiling that must never cap a still-mode exposure.
+PREVIEW_MODE_LIMITS = {
+    "exposure_time_us": {"min": 100, "max": 112_000_000, "default": 20_000},
+    "analogue_gain": {"min": 1.0, "max": 16.0, "default": 1.0},
+    "frame_duration_us": {"min": 33_333, "max": 120_000},
 }
 
 AUTO = {"exposure_mode": "auto", "exposure_value": 1, "sharpness": 4, "autofocus_mode": 2}
@@ -39,6 +48,15 @@ class ReadSensorLimitsTests(unittest.TestCase):
             with self.subTest(raw=raw):
                 limits = camera_controls.read_sensor_limits(raw)
                 self.assertEqual(limits, camera_controls.DEFAULT_SENSOR_LIMITS)
+
+    def test_reversed_min_max_is_swapped_not_collapsed(self):
+        # With low > high, _clamp() would otherwise collapse every value to
+        # the larger number -- pinning every capture to the sensor maximum.
+        raw = {"ExposureTime": (112_000_000, 75, 20_000)}
+        with self.assertLogs("camera_controls", level="WARNING"):
+            limits = camera_controls.read_sensor_limits(raw)
+        self.assertEqual(limits["exposure_time_us"]["min"], 75)
+        self.assertEqual(limits["exposure_time_us"]["max"], 112_000_000)
 
 
 class BuildControlsAutoTests(unittest.TestCase):
@@ -91,7 +109,8 @@ class BuildControlsManualTests(unittest.TestCase):
         # A recipe marked manual but carrying exposure_time_us 0 is a config
         # error. Clamping to the sensor minimum would give a 1/10000s frame --
         # a black photo. Falling back to auto gives a usable one.
-        controls = camera_controls.build_controls(dict(MANUAL, exposure_time_us=0), LIMITS)
+        with self.assertLogs("camera_controls", level="WARNING"):
+            controls = camera_controls.build_controls(dict(MANUAL, exposure_time_us=0), LIMITS)
         self.assertIs(controls["AeEnable"], True)
         self.assertNotIn("ExposureTime", controls)
 
@@ -104,6 +123,49 @@ class BuildControlsManualTests(unittest.TestCase):
         self.assertIs(controls["AeEnable"], True)
         self.assertIn("Sharpness", controls)
         self.assertIn("AfMode", controls)
+
+    def test_frame_duration_is_never_clamped_below_the_exposure(self):
+        # THE headline bug: exposure_us is clamped against the EXPOSURE
+        # limits, but frame_us must cover it even when the sensor's reported
+        # FRAME-DURATION ceiling (read in preview mode, per I7) is far below
+        # the requested exposure. Clamping frame_us down to that ceiling is
+        # exactly the condition that makes libcamera silently cap the
+        # exposure -- turning a 4-second Night recipe into a 120ms photo.
+        with self.assertLogs("camera_controls", level="WARNING"):
+            controls = camera_controls.build_controls(MANUAL, PREVIEW_MODE_LIMITS)
+        low, high = controls["FrameDurationLimits"]
+        self.assertGreaterEqual(low, 4_000_000)
+        self.assertGreaterEqual(high, 4_000_000)
+        self.assertEqual(controls["ExposureTime"], 4_000_000)
+
+    def test_exposure_time_us_numeric_string_is_coerced_not_rejected(self):
+        camera = dict(MANUAL, exposure_time_us="4000000")
+        controls = camera_controls.build_controls(camera, LIMITS)
+        self.assertEqual(controls["ExposureTime"], 4_000_000)
+
+    def test_analogue_gain_numeric_string_is_coerced_not_rejected(self):
+        camera = dict(MANUAL, analogue_gain="2.0")
+        controls = camera_controls.build_controls(camera, LIMITS)
+        self.assertEqual(controls["AnalogueGain"], 2.0)
+
+    def test_fast_mode_forces_auto_regardless_of_recipe(self):
+        # The startup photo must never inherit a long manual exposure -- that
+        # is what turns a boot into a systemd restart loop (Type=notify,
+        # TimeoutStartSec=45, Restart=always).
+        controls = camera_controls.build_controls(MANUAL, LIMITS, fast_mode=True)
+        self.assertIs(controls["AeEnable"], True)
+        self.assertNotIn("ExposureTime", controls)
+
+    def test_include_autofocus_true_by_default(self):
+        controls = camera_controls.build_controls(MANUAL, LIMITS)
+        self.assertIn("AfMode", controls)
+
+    def test_include_autofocus_false_omits_af_mode(self):
+        # configure_camera() needs AfMode excluded from the configure()-time
+        # dict: a sensor without autofocus must not make the whole configure()
+        # call raise and silently drop ExposureValue/Sharpness too.
+        controls = camera_controls.build_controls(AUTO, LIMITS, include_autofocus=False)
+        self.assertNotIn("AfMode", controls)
 
 
 class DescribeLimitsTests(unittest.TestCase):
@@ -143,6 +205,14 @@ class AutofocusSettleTests(unittest.TestCase):
         self.assertEqual(
             camera_controls.autofocus_settle_seconds(AUTO, has_captured=False, fast_mode=False),
             0.3)
+
+    def test_fast_mode_wins_even_with_manual_af_off_recipe_active(self):
+        # Previously the manual/AF-off check ran before the fast_mode check,
+        # so an active manual recipe defeated fast_mode and the startup
+        # capture got no settle at all.
+        self.assertEqual(
+            camera_controls.autofocus_settle_seconds(MANUAL, has_captured=False, fast_mode=True),
+            0.1)
 
 
 if __name__ == "__main__":

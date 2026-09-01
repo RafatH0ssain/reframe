@@ -195,9 +195,16 @@ def validate_settings(settings: Dict[str, Any]) -> None:
         capture = section(recipe, "capture", f"{path}.capture")
         if capture.get("exposure_mode") not in {"auto", "manual"}:
             raise SettingsValidationError(f"{path}.capture.exposure_mode must be auto or manual")
-        # Provisional bounds. Phase 1B replaces these with sensor-reported
-        # limits read from picam2.camera_controls.
+        # These bounds are deliberately generous, not sensor-reported: the
+        # dashboard and camera are separate processes with no startup
+        # ordering guarantee, so validation here cannot depend on the camera
+        # being up. The /api/camera/limits route bounds the UI's inputs
+        # instead, once the camera process is actually reachable.
         integer(capture.get("exposure_time_us"), f"{path}.capture.exposure_time_us", 0, 200000000)
+        if capture.get("exposure_mode") == "manual" and not capture.get("exposure_time_us"):
+            raise SettingsValidationError(
+                f"{path}.capture.exposure_time_us must be greater than 0 when "
+                f"{path}.capture.exposure_mode is manual")
         number(capture.get("analogue_gain"), f"{path}.capture.analogue_gain", 1.0, 16.0)
         number(capture.get("exposure_value"), f"{path}.capture.exposure_value", -2, 2)
         number(capture.get("sharpness"), f"{path}.capture.sharpness", 0, 10)

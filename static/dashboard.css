@@ -670,5 +670,5 @@
             }
 
             .manual-exposure-field.is-visible {
-                display: block;
+                display: flex;
             }
