@@ -1355,6 +1355,19 @@ async def get_camera_settings():
     """Get camera-specific settings."""
     return settings_manager.get_camera_settings()
 
+@app.get("/api/camera/limits")
+async def get_camera_limits():
+    """Proxy the sensor's real control ranges from the hardware service.
+
+    Not merged into validate_settings: the dashboard and camera are separate
+    processes with no startup ordering guarantee, so settings validation must
+    work whether or not the camera is up. These bound the UI instead.
+    """
+    try:
+        return await reframe_client.get("/camera/limits")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not read camera limits: {e}")
+
 @app.get("/api/settings/processing") 
 async def get_processing_settings():
     """Get processing-specific settings."""

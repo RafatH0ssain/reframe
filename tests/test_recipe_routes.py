@@ -261,6 +261,34 @@ class RecipeRouteTests(unittest.TestCase):
         stored = json.loads(self.path.read_text(encoding="utf-8"))
         self.assertEqual(stored["recipes"]["active"], original_active)
 
+    def test_camera_limits_are_proxied_from_the_hardware_service(self):
+        expected = {
+            "exposure_time_us": {"min": 75, "max": 112_015_130, "default": 20_000},
+            "analogue_gain": {"min": 1.0, "max": 16.0, "default": 1.0},
+            "frame_duration_us": {"min": 33_333, "max": 112_015_400},
+        }
+
+        async def fake_get(path):
+            self.assertEqual(path, "/camera/limits")
+            return expected
+
+        with patch.object(dashboard.reframe_client, "get", fake_get):
+            response = self.client.get("/api/camera/limits")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), expected)
+
+    def test_camera_limits_surface_an_error_when_the_camera_is_down(self):
+        async def failing_get(path):
+            raise RuntimeError("camera not running")
+
+        with patch.object(dashboard.reframe_client, "get", failing_get):
+            response = self.client.get("/api/camera/limits")
+
+        # The UI must be able to tell "camera is down" from "here are limits",
+        # so this may not quietly return defaults with a 200.
+        self.assertEqual(response.status_code, 502)
+
 
 if __name__ == "__main__":
     unittest.main()

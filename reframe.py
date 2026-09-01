@@ -1666,6 +1666,12 @@ def _create_fastapi_routes():
             logging.warning(f"Error getting system status: {e}")
             return {"success": False, "error": str(e), "message": "Could not get system status"}
 
+    @app.get("/api/camera/limits")
+    def api_camera_limits():
+        if camera_system is None:
+            raise HTTPException(status_code=503, detail="Camera not ready")
+        return camera_system.camera_manager.sensor_limits
+
     @app.get("/api/dashboard/access")
     def api_dashboard_access():
         global camera_system
