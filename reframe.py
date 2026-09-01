@@ -21,6 +21,8 @@ def _lazy_import_pil():
 
 from picamera2 import Picamera2
 
+import camera_controls
+
 from typing import Optional, Dict, Any
 
 np = None
@@ -253,6 +255,18 @@ class CameraManager:
         self.settings_path = settings_path
         self.settings = self.load_settings()
         self.picam2 = Picamera2()
+
+        # Read the sensor's real control ranges once. Wrapped because a ported
+        # camera may not expose camera_controls at all -- falling back to
+        # permissive defaults is always better than failing to start.
+        try:
+            self.sensor_limits = camera_controls.read_sensor_limits(self.picam2.camera_controls)
+        except Exception as e:
+            logging.warning("Could not read sensor limits, using defaults: %s", e)
+            self.sensor_limits = camera_controls.DEFAULT_SENSOR_LIMITS
+
+        logging.info("Sensor limits: %s", camera_controls.describe_limits(self.sensor_limits))
+
         self.last_activity_monotonic = time.monotonic()
         self._has_captured = False  # Track if we've taken at least one photo (for adaptive AF)
         self.configure_camera()
@@ -311,14 +325,7 @@ class CameraManager:
             camera_settings = self.settings.get("camera", {})
 
         # Update only the controls that can be changed while running
-        controls = {}
-
-        if "exposure_value" in camera_settings:
-            controls["ExposureValue"] = camera_settings["exposure_value"]
-        if "sharpness" in camera_settings:
-            controls["Sharpness"] = camera_settings["sharpness"]
-        if "autofocus_mode" in camera_settings:
-            controls["AfMode"] = camera_settings["autofocus_mode"]
+        controls = camera_controls.build_controls(camera_settings, self.sensor_limits)
 
         # Apply controls one by one to handle unsupported controls gracefully
         for control_name, control_value in controls.items():
@@ -398,10 +405,7 @@ class CameraManager:
         )
 
         # Build controls dictionary from settings
-        controls = {
-            "ExposureValue": camera_settings.get("exposure_value", 0),
-            "Sharpness": camera_settings.get("sharpness", 3)
-        }
+        controls = camera_controls.build_controls(camera_settings, self.sensor_limits)
 
 
         camera_config["controls"] = controls
@@ -482,17 +486,11 @@ class CameraManager:
     def _settle_autofocus(self, fast_mode=False):
         """Give autofocus a short settle window before capture."""
         self.update_activity_time()
-        autofocus_mode = self.settings.get("camera", {}).get("autofocus_mode", 2)
-        if fast_mode:
-            sleep(0.1)  # Shorter autofocus for startup
-            logging.info("Fast autofocus mode: 0.1s delay")
-        elif self._has_captured and autofocus_mode == 2:
-            logging.info("Continuous autofocus already active: no settle delay")
-        elif self._has_captured:
-            sleep(0.1)  # Sensor already focused from previous capture
-            logging.info("Adaptive autofocus: 0.1s delay (sensor pre-focused)")
-        else:
-            sleep(0.3)  # First capture needs full autofocus settle time
+        camera_settings = self.settings.get("camera", {})
+        delay = camera_controls.autofocus_settle_seconds(
+            camera_settings, self._has_captured, fast_mode)
+        if delay:
+            sleep(delay)
         self._has_captured = True
 
 class ImageProcessor:
