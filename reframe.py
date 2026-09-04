@@ -1819,6 +1819,20 @@ def main():
         # does not wait for the e-ink panel's long physical refresh.
         _notify_systemd_ready(startup_status)
 
+    # The startup capture deliberately ran with fast_mode=True, which forces
+    # AUTO exposure so a long manual recipe cannot stall the Type=notify
+    # handshake into a restart loop. READY=1 has now been sent, so it is safe
+    # to reconfigure to the recipe the user actually selected. Without this a
+    # persisted manual recipe stays overridden for every capture until some
+    # camera setting genuinely changes, because reload_settings() compares
+    # in-memory state that already matches the file.
+    try:
+        with _operation_lock:
+            camera_system.camera_manager.configure_camera()
+        logging.info("Reconfigured camera to the active recipe after startup")
+    except Exception as e:
+        logging.error("Could not reconfigure camera to the active recipe: %s", e)
+
     # ═══════════════════════════════════════════════════════════════
     # HARDWARE: Button — PiSugar 3 via I2C
     # The PiSugar 3 exposes a button register at I2C address 0x57.
