@@ -240,7 +240,6 @@ class ValidationTests(unittest.TestCase):
                        "show_dashboard_qr_on_wifi_connect": True, "camera_name": ""},
             "exports": {"upscale_dithered_2x": False},
             "extensions": {"arena": {"enabled": False, "channel": "", "access_token": ""}},
-            "trigger": {"program": "single", "bracket": {"frames": 3, "step_ev": 1.0}},
         }
         return recipes.migrate_settings(base, DEFAULT_CAMERA, DEFAULT_PROCESSING)
 
@@ -317,8 +316,19 @@ class ValidationTests(unittest.TestCase):
         dashboard.validate_settings(settings)
 
     def test_default_trigger_is_a_single_shot(self):
-        settings = self._valid()
+        # An upgrading user's shutter behaviour must not silently change from
+        # taking one photo to taking a bracket. Bootstrap a real
+        # SettingsManager against a path that doesn't exist yet -- the same
+        # fresh-install path exercised by
+        # test_constructing_against_a_missing_file_writes_usable_settings --
+        # and check what it actually produces, not a literal the test wrote.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            missing = Path(temp_dir) / "brand-new.json"
+            manager = dashboard.SettingsManager(str(missing))
+            settings = manager.load_settings()
+
         self.assertEqual(settings["trigger"]["program"], "single")
+        self.assertEqual(settings["trigger"]["bracket"]["frames"], 3)
         dashboard.validate_settings(settings)
 
     def test_bracket_trigger_is_accepted(self):
