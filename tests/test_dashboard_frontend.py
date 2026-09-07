@@ -111,6 +111,26 @@ class RouteTests(unittest.TestCase):
         js = JS.read_text(encoding="utf-8")
         self.assertIn("function toggleManualExposureFields", js)
 
+    def test_settings_modal_exposes_the_program_picker(self):
+        body = self.client.get("/").text
+        self.assertIn('id="trigger-program"', body)
+        self.assertIn('id="trigger-bracket-frames"', body)
+        self.assertIn('id="trigger-bracket-step"', body)
+
+    def test_gallery_renders_provenance_safely(self):
+        js = JS.read_text(encoding="utf-8")
+        self.assertIn("frame_label", js)
+        self.assertIn("recipe_name", js)
+        # Provenance comes from sidecar files on disk; it must be escaped like
+        # every other user-supplied string in this file.
+        self.assertNotIn("${photo.recipe_name}", js)
+        self.assertNotIn("${photo.frame_label}", js)
+
+    def test_develop_action_posts_to_the_develop_route(self):
+        js = JS.read_text(encoding="utf-8")
+        self.assertIn("function developPhoto", js)
+        self.assertIn("/develop", js)
+
 
 if __name__ == "__main__":
     unittest.main()

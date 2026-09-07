@@ -103,6 +103,7 @@
                             alt="Photo ${photo.id}"
                             class="photo-image"
                         />
+                        ${renderProvenance(photo)}
                         <div class="photo-info">
                             <div class="photo-actions">
                                 <a href="${photo.original_path}" class="action-btn btn-primary" download onclick="event.stopPropagation()">
@@ -573,6 +574,13 @@
                 document.getElementById('arena-access-token').value = '';
                 arenaTokenShouldClear = false;
                 updateArenaTokenStatus(Boolean(arenaSettings.access_token_configured));
+
+                const trigger = settings.trigger || {};
+                const bracket = trigger.bracket || {};
+                document.getElementById('trigger-program').value = trigger.program || 'single';
+                document.getElementById('trigger-bracket-frames').value = String(bracket.frames || 3);
+                document.getElementById('trigger-bracket-step').value = bracket.step_ev || 1.0;
+                toggleBracketFields();
                 settingsFormSnapshot = getSettingsFormSnapshot();
             }
 
@@ -692,6 +700,13 @@
                         },
                         exports: {
                             upscale_dithered_2x: document.getElementById('upscale-dithered-2x').value === 'true'
+                        },
+                        trigger: {
+                            program: document.getElementById('trigger-program').value,
+                            bracket: {
+                                frames: Number(document.getElementById('trigger-bracket-frames').value),
+                                step_ev: Number(document.getElementById('trigger-bracket-step').value)
+                            }
                         },
                         extensions: {
                             arena: {
@@ -1449,6 +1464,47 @@
                 document.querySelectorAll('.manual-exposure-field').forEach(field => {
                     field.classList.toggle('is-visible', manual);
                 });
+            }
+
+            function toggleBracketFields() {
+                const bracketing = document.getElementById('trigger-program').value === 'bracket';
+                document.querySelectorAll('.bracket-field').forEach(field => {
+                    field.classList.toggle('is-visible', bracketing);
+                });
+            }
+
+            function renderProvenance(photo) {
+                if (!photo.recipe_name && !photo.frame_label) {
+                    return '';
+                }
+                const parts = [];
+                if (photo.recipe_name) {
+                    parts.push(escapeHtml(photo.recipe_name));
+                }
+                if (photo.frame_label && photo.frame_label !== '0EV') {
+                    parts.push(escapeHtml(photo.frame_label));
+                }
+                return `<div class="photo-provenance">${parts.join(' · ')}</div>`;
+            }
+
+            async function developPhoto(photoId, recipeId) {
+                try {
+                    const response = await fetch(`/api/photos/${encodeURIComponent(photoId)}/develop`, {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({recipe_id: recipeId})
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        alert(data.detail || 'Could not develop photo.');
+                        return false;
+                    }
+                    await loadPhotos();
+                    return true;
+                } catch (error) {
+                    console.error('Develop failed:', error);
+                    return false;
+                }
             }
 
             async function deleteRecipe(recipeId) {

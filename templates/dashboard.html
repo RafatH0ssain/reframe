@@ -100,6 +100,35 @@
                     <p id="recipe-status" class="settings-hint"></p>
                 </div>
 
+                <div class="settings-section settings-trigger">
+                    <h3>shutter</h3>
+                    <div class="setting-group">
+                        <div>
+                            <span class="setting-label">what one press does</span>
+                            <select id="trigger-program" class="setting-input" onchange="toggleBracketFields()">
+                                <option value="single">one photo</option>
+                                <option value="bracket">exposure bracket</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="setting-group bracket-field">
+                        <div>
+                            <span class="setting-label">frames</span>
+                            <select id="trigger-bracket-frames" class="setting-input">
+                                <option value="3">3</option>
+                                <option value="5">5</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="setting-group bracket-field">
+                        <div>
+                            <span class="setting-label">stops between frames</span>
+                            <input type="number" id="trigger-bracket-step" class="setting-input" step="0.1" min="0.3" max="2.0" value="1.0">
+                            <div class="setting-help">the extra frames are taken after the photo appears on screen</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="settings-section settings-camera">
                     <h3>camera settings</h3>
                     <div class="setting-group disabled-setting">
