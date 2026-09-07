@@ -23,6 +23,8 @@ def _lazy_import_pil():
 from picamera2 import Picamera2
 
 import camera_controls
+import capture_programs
+import recipes
 
 from typing import Optional, Dict, Any
 
@@ -1007,6 +1009,18 @@ class FileManager:
         logging.info(f"Image saved to {file_path}")
         return file_path
 
+    def sidecar_path(self, photo_id):
+        """Provenance file for a photo: photos/00042.json beside photos/00042.jpg."""
+        return os.path.join(self.save_path, f"{photo_id}.json")
+
+    def write_sidecar(self, photo_id, sidecar):
+        """Write a photo's provenance record. Never fails a capture."""
+        try:
+            with open(self.sidecar_path(photo_id), "w", encoding="utf-8") as handle:
+                json.dump(sidecar, handle, indent=2)
+        except Exception as e:
+            logging.error("Could not write sidecar for %s: %s", photo_id, e)
+
     def get_photo_info(self, photo_id):
         """Get information about a specific photo by ID."""
         # Find original photo
@@ -1081,6 +1095,13 @@ class FileManager:
             if os.path.exists(p):
                 os.remove(p)
                 deleted_files.append(p)
+
+        sidecar = self.sidecar_path(photo_id)
+        if os.path.exists(sidecar):
+            try:
+                os.remove(sidecar)
+            except OSError as e:
+                logging.warning("Could not remove sidecar for %s: %s", photo_id, e)
 
         if deleted_files:
             logging.info(f"Deleted photo {photo_id}: {deleted_files}")
@@ -1440,6 +1461,13 @@ class CameraSystem:
                 # image processing instead of delaying the physical refresh.
                 self.eink_display.prepare_async()
 
+            program = capture_programs.program_for(self.camera_manager.settings.get("trigger"))
+            group_id = capture_programs.make_group_id()
+            base_controls = camera_controls.build_controls(
+                self.camera_manager.settings.get("camera", {}),
+                self.camera_manager.sensor_limits,
+                fast_mode=fast_mode)
+
             pipeline_start = time.monotonic()
             result, original_image = self.camera_manager.capture_image_with_metadata(photo_path, fast_mode=fast_mode)
 
@@ -1484,11 +1512,30 @@ class CameraSystem:
                         logging.info(f"Original JPEG saved: {photo_path}")
                         dithered_image.save(dithered_path, format="PNG")
                         logging.info(f"Dithered PNG saved: {dithered_path}")
+                        active = recipes.resolve_active(self.camera_manager.settings)
+                        self.file_manager.write_sidecar(result["photo_id"],
+                            capture_programs.build_sidecar(
+                                recipe_id=active.get("id", ""),
+                                recipe_name=active.get("name", ""),
+                                program=program.id,
+                                group_id=group_id,
+                                frame_label="0EV",
+                                resolved_controls=base_controls))
                     except Exception as e:
                         logging.error(f"Error saving photo outputs: {e}")
 
                 save_thread = threading.Thread(target=_save_outputs, daemon=True)
                 save_thread.start()
+
+                # Bracket frames are captured only after the base frame has been
+                # dispatched to the panel, so shutter-to-display latency is
+                # identical whether or not bracketing is on.
+                extra_frames = [f for f in program.plan(base_controls) if f.controls]
+                if extra_frames:
+                    threading.Thread(
+                        target=self._capture_bracket_frames,
+                        args=(extra_frames, base_controls, program, group_id),
+                        daemon=True).start()
 
             return result
 
@@ -1499,6 +1546,42 @@ class CameraSystem:
                 "error": str(e),
                 "message": f"Photo capture failed: {str(e)}"
             }
+
+    def _capture_bracket_frames(self, frames, base_controls, program, group_id):
+        """Capture a bracket's offset frames after the base frame is on screen.
+
+        Runs on a background thread. Every failure is contained: a bracket that
+        cannot finish must still leave the photo the user actually saw.
+        """
+        active = recipes.resolve_active(self.camera_manager.settings)
+        for frame in frames:
+            try:
+                merged = dict(base_controls)
+                merged.update(frame.controls)
+                self.camera_manager.picam2.set_controls(merged)
+
+                photo_path = self.file_manager.get_new_file_path(
+                    SAVE_PATH, ORIGINAL_CAPTURE_EXTENSION)
+                photo_id = os.path.splitext(os.path.basename(photo_path))[0]
+                image = self.camera_manager.capture_image()
+                image.save(photo_path, format="JPEG")
+
+                self.file_manager.write_sidecar(photo_id,
+                    capture_programs.build_sidecar(
+                        recipe_id=active.get("id", ""),
+                        recipe_name=active.get("name", ""),
+                        program=program.id,
+                        group_id=group_id,
+                        frame_label=frame.label,
+                        resolved_controls=merged))
+                logging.info("Bracket frame %s saved as %s", frame.label, photo_id)
+            except Exception as e:
+                logging.error("Bracket frame %s failed: %s", frame.label, e)
+
+        try:
+            self.camera_manager.apply_camera_settings()
+        except Exception as e:
+            logging.error("Could not restore controls after bracket: %s", e)
 
     def display_photo_api(self, photo_id):
         """API-style photo display."""
