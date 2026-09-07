@@ -1461,7 +1461,7 @@ class CameraSystem:
                 # image processing instead of delaying the physical refresh.
                 self.eink_display.prepare_async()
 
-            program = capture_programs.program_for(self.camera_manager.settings.get("trigger"))
+            program = capture_programs.program_for(self.camera_manager.settings.get("trigger"), fast_mode=fast_mode)
             group_id = capture_programs.make_group_id()
             base_controls = camera_controls.build_controls(
                 self.camera_manager.settings.get("camera", {}),
@@ -1529,13 +1529,19 @@ class CameraSystem:
 
                 # Bracket frames are captured only after the base frame has been
                 # dispatched to the panel, so shutter-to-display latency is
-                # identical whether or not bracketing is on.
-                extra_frames = [f for f in program.plan(base_controls) if f.controls]
-                if extra_frames:
-                    threading.Thread(
-                        target=self._capture_bracket_frames,
-                        args=(extra_frames, base_controls, program, group_id),
-                        daemon=True).start()
+                # identical whether or not bracketing is on. This must not be
+                # able to turn an already-successful capture into a reported
+                # failure, so it gets its own try/except rather than sharing
+                # the outer one.
+                try:
+                    extra_frames = [f for f in program.plan(base_controls) if f.controls]
+                    if extra_frames:
+                        threading.Thread(
+                            target=self._capture_bracket_frames,
+                            args=(extra_frames, base_controls, program, group_id),
+                            daemon=True).start()
+                except Exception as e:
+                    logging.error(f"Could not dispatch bracket frames: {e}")
 
             return result
 
@@ -1552,36 +1558,49 @@ class CameraSystem:
 
         Runs on a background thread. Every failure is contained: a bracket that
         cannot finish must still leave the photo the user actually saw.
+
+        Holds _operation_lock for the whole run -- capture loop and restore
+        alike -- so this worker cannot race a capture_photo_api call arriving
+        on another thread while it is still driving the same Picamera2
+        instance. Callers acquire the lock non-blocking (see the button loop),
+        so a press arriving mid-bracket is dropped rather than queued, which
+        is the behaviour we want.
         """
-        active = recipes.resolve_active(self.camera_manager.settings)
-        for frame in frames:
+        with _operation_lock:
             try:
-                merged = dict(base_controls)
-                merged.update(frame.controls)
-                self.camera_manager.picam2.set_controls(merged)
-
-                photo_path = self.file_manager.get_new_file_path(
-                    SAVE_PATH, ORIGINAL_CAPTURE_EXTENSION)
-                photo_id = os.path.splitext(os.path.basename(photo_path))[0]
-                image = self.camera_manager.capture_image()
-                image.save(photo_path, format="JPEG")
-
-                self.file_manager.write_sidecar(photo_id,
-                    capture_programs.build_sidecar(
-                        recipe_id=active.get("id", ""),
-                        recipe_name=active.get("name", ""),
-                        program=program.id,
-                        group_id=group_id,
-                        frame_label=frame.label,
-                        resolved_controls=merged))
-                logging.info("Bracket frame %s saved as %s", frame.label, photo_id)
+                active = recipes.resolve_active(self.camera_manager.settings)
             except Exception as e:
-                logging.error("Bracket frame %s failed: %s", frame.label, e)
+                logging.error("Could not resolve active recipe for bracket: %s", e)
+                active = {}
 
-        try:
-            self.camera_manager.apply_camera_settings()
-        except Exception as e:
-            logging.error("Could not restore controls after bracket: %s", e)
+            for frame in frames:
+                try:
+                    merged = dict(base_controls)
+                    merged.update(frame.controls)
+                    self.camera_manager.picam2.set_controls(merged)
+
+                    photo_path = self.file_manager.get_new_file_path(
+                        SAVE_PATH, ORIGINAL_CAPTURE_EXTENSION)
+                    photo_id = os.path.splitext(os.path.basename(photo_path))[0]
+                    image = self.camera_manager.capture_image()
+                    image.save(photo_path, format="JPEG")
+
+                    self.file_manager.write_sidecar(photo_id,
+                        capture_programs.build_sidecar(
+                            recipe_id=active.get("id", ""),
+                            recipe_name=active.get("name", ""),
+                            program=program.id,
+                            group_id=group_id,
+                            frame_label=frame.label,
+                            resolved_controls=merged))
+                    logging.info("Bracket frame %s saved as %s", frame.label, photo_id)
+                except Exception as e:
+                    logging.error("Bracket frame %s failed: %s", frame.label, e)
+
+            try:
+                self.camera_manager.apply_camera_settings()
+            except Exception as e:
+                logging.error("Could not restore controls after bracket: %s", e)
 
     def display_photo_api(self, photo_id):
         """API-style photo display."""

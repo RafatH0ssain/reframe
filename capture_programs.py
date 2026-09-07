@@ -110,8 +110,16 @@ class Bracket:
         return False
 
 
-def program_for(trigger):
-    """Pick the program named by the trigger settings."""
+def program_for(trigger, fast_mode=False):
+    """Pick the program named by the trigger settings.
+
+    fast_mode forces a single shot regardless of the trigger settings -- used
+    for the startup photo, which is a "something on screen" shot rather than
+    a composition and should not compete with boot for camera time. Mirrors
+    camera_controls.build_controls's own fast_mode parameter.
+    """
+    if fast_mode:
+        return SingleShot()
     trigger = trigger or {}
     if trigger.get("program") == "bracket":
         bracket = trigger.get("bracket") or {}

@@ -126,6 +126,19 @@ class ProgramSelectionTests(unittest.TestCase):
         program = capture_programs.program_for({"program": "interval"})
         self.assertIsInstance(program, capture_programs.SingleShot)
 
+    def test_fast_mode_forces_a_single_shot(self):
+        # The startup photo is a "something on screen" shot; bracketing it
+        # competes with boot and delays the first frame the user sees.
+        program = capture_programs.program_for(
+            {"program": "bracket", "bracket": {"frames": 5, "step_ev": 1.0}},
+            fast_mode=True)
+        self.assertIsInstance(program, capture_programs.SingleShot)
+
+    def test_normal_mode_still_brackets(self):
+        program = capture_programs.program_for(
+            {"program": "bracket", "bracket": {"frames": 5, "step_ev": 1.0}})
+        self.assertIsInstance(program, capture_programs.Bracket)
+
 
 class GroupIdTests(unittest.TestCase):
     def test_group_id_is_stable_for_given_inputs(self):
