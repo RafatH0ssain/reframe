@@ -240,6 +240,7 @@ class ValidationTests(unittest.TestCase):
                        "show_dashboard_qr_on_wifi_connect": True, "camera_name": ""},
             "exports": {"upscale_dithered_2x": False},
             "extensions": {"arena": {"enabled": False, "channel": "", "access_token": ""}},
+            "trigger": {"program": "single", "bracket": {"frames": 3, "step_ev": 1.0}},
         }
         return recipes.migrate_settings(base, DEFAULT_CAMERA, DEFAULT_PROCESSING)
 
@@ -314,6 +315,41 @@ class ValidationTests(unittest.TestCase):
         settings["recipes"]["items"][0]["capture"]["exposure_mode"] = "manual"
         settings["recipes"]["items"][0]["capture"]["exposure_time_us"] = 4_000_000
         dashboard.validate_settings(settings)
+
+    def test_default_trigger_is_a_single_shot(self):
+        settings = self._valid()
+        self.assertEqual(settings["trigger"]["program"], "single")
+        dashboard.validate_settings(settings)
+
+    def test_bracket_trigger_is_accepted(self):
+        settings = self._valid()
+        settings["trigger"] = {"program": "bracket",
+                               "bracket": {"frames": 5, "step_ev": 0.5}}
+        dashboard.validate_settings(settings)
+
+    def test_unknown_program_is_rejected(self):
+        settings = self._valid()
+        settings["trigger"] = {"program": "interval", "bracket": {"frames": 3, "step_ev": 1.0}}
+        with self.assertRaises(dashboard.SettingsValidationError):
+            dashboard.validate_settings(settings)
+
+    def test_bracket_frame_count_must_be_three_or_five(self):
+        for count in (2, 4, 7):
+            with self.subTest(count=count):
+                settings = self._valid()
+                settings["trigger"] = {"program": "bracket",
+                                       "bracket": {"frames": count, "step_ev": 1.0}}
+                with self.assertRaises(dashboard.SettingsValidationError):
+                    dashboard.validate_settings(settings)
+
+    def test_bracket_step_must_be_within_range(self):
+        for step in (0.1, 3.0):
+            with self.subTest(step=step):
+                settings = self._valid()
+                settings["trigger"] = {"program": "bracket",
+                                       "bracket": {"frames": 3, "step_ev": step}}
+                with self.assertRaises(dashboard.SettingsValidationError):
+                    dashboard.validate_settings(settings)
 
 
 class SettingsManagerRecipeTests(unittest.TestCase):

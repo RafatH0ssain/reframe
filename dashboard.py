@@ -224,6 +224,14 @@ def validate_settings(settings: Dict[str, Any]) -> None:
     if recipes_section.get("active") not in seen_ids:
         raise SettingsValidationError("recipes.active must name an existing recipe id")
 
+    trigger = section(settings, "trigger", "trigger")
+    if trigger.get("program", "single") not in {"single", "bracket"}:
+        raise SettingsValidationError("trigger.program must be 'single' or 'bracket'")
+    bracket = section(trigger, "bracket", "trigger.bracket")
+    if bracket.get("frames", 3) not in {3, 5}:
+        raise SettingsValidationError("trigger.bracket.frames must be 3 or 5")
+    number(bracket.get("step_ev", 1.0), "trigger.bracket.step_ev", 0.3, 2.0)
+
 class SettingsManager:
     """Manages settings operations for the dashboard."""
     
@@ -247,6 +255,10 @@ class SettingsManager:
             "recipes": {
                 "active": "standard",
                 "items": []
+            },
+            "trigger": {
+                "program": "single",
+                "bracket": {"frames": 3, "step_ev": 1.0}
             },
             "display": {
                 "auto_display": True,

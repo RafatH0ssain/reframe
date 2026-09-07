@@ -121,5 +121,12 @@
         }
       }
     ]
+  },
+  "trigger": {
+    "program": "single",
+    "bracket": {
+      "frames": 3,
+      "step_ev": 1.0
+    }
   }
 }
