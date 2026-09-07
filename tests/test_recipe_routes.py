@@ -289,6 +289,77 @@ class RecipeRouteTests(unittest.TestCase):
         # so this may not quietly return defaults with a 200.
         self.assertEqual(response.status_code, 502)
 
+    def _write_photo_with_sidecar(self, photo_id, group_id, frame_label):
+        from PIL import Image
+        photos = Path(dashboard.PHOTOS_PATH)
+        photos.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (4, 4)).save(photos / f"{photo_id}.jpg", format="JPEG")
+        (photos / f"{photo_id}.json").write_text(json.dumps({
+            "recipe_id": "night", "recipe_name": "Night", "program": "bracket",
+            "group_id": group_id, "frame_label": frame_label,
+            "resolved_controls": {}, "captured_at": "2026-09-06T14:22:11+00:00",
+        }), encoding="utf-8")
+
+    def test_gallery_entries_carry_their_provenance(self):
+        self._write_photo_with_sidecar("90001", "grp-1", "0EV")
+        photos = dashboard.PhotoManager().get_all_photos()["photos"]
+        entry = [p for p in photos if p["id"] == "90001"][0]
+        self.assertEqual(entry["group_id"], "grp-1")
+        self.assertEqual(entry["frame_label"], "0EV")
+        self.assertEqual(entry["recipe_name"], "Night")
+
+    def test_a_photo_without_a_sidecar_still_lists(self):
+        # Every photo taken before this phase has no sidecar. The gallery must
+        # not hide them or crash on them.
+        from PIL import Image
+        photos = Path(dashboard.PHOTOS_PATH)
+        photos.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (4, 4)).save(photos / "90002.jpg", format="JPEG")
+        listed = dashboard.PhotoManager().get_all_photos()["photos"]
+        entry = [p for p in listed if p["id"] == "90002"][0]
+        self.assertIsNone(entry["group_id"])
+        self.assertIsNone(entry["frame_label"])
+
+    def test_a_corrupt_sidecar_does_not_break_the_gallery(self):
+        from PIL import Image
+        photos = Path(dashboard.PHOTOS_PATH)
+        photos.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (4, 4)).save(photos / "90003.jpg", format="JPEG")
+        (photos / "90003.json").write_text("{not json", encoding="utf-8")
+        listed = dashboard.PhotoManager().get_all_photos()["photos"]
+        entry = [p for p in listed if p["id"] == "90003"][0]
+        self.assertIsNone(entry["group_id"])
+
+    def test_develop_applies_a_recipes_render_settings(self):
+        self._write_photo_with_sidecar("90004", "grp-2", "0EV")
+        sent = {}
+
+        async def fake_post(path, json=None):
+            sent["path"] = path
+            sent["json"] = json
+            return {"status": "ok"}
+
+        with patch.object(dashboard.reframe_client, "post", fake_post):
+            response = self.client.post("/api/photos/90004/develop",
+                                        json={"recipe_id": "high-contrast"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(sent["path"], "/reprocess/90004")
+        expected = [r for r in dashboard.settings_manager.load_settings()["recipes"]["items"]
+                    if r["id"] == "high-contrast"][0]["render"]
+        self.assertEqual(sent["json"]["processing_settings"], expected)
+
+    def test_develop_rejects_an_unknown_recipe(self):
+        self._write_photo_with_sidecar("90005", "grp-3", "0EV")
+        response = self.client.post("/api/photos/90005/develop",
+                                    json={"recipe_id": "nope"})
+        self.assertEqual(response.status_code, 404)
+
+    def test_develop_rejects_a_missing_photo(self):
+        response = self.client.post("/api/photos/does-not-exist/develop",
+                                    json={"recipe_id": "standard"})
+        self.assertEqual(response.status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

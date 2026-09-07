@@ -635,6 +635,11 @@ class PhotoManager:
                         "size": photo_file.stat().st_size,
                         "created": datetime.fromtimestamp(photo_file.stat().st_mtime).isoformat()
                     }
+                    sidecar = self._read_sidecar(photo_file)
+                    photo_info["group_id"] = sidecar.get("group_id")
+                    photo_info["frame_label"] = sidecar.get("frame_label")
+                    photo_info["recipe_name"] = sidecar.get("recipe_name")
+                    photo_info["program"] = sidecar.get("program")
                     all_photos.append(photo_info)
         
         # Calculate pagination
@@ -658,6 +663,20 @@ class PhotoManager:
             }
         }
     
+    def _read_sidecar(self, photo_file):
+        """Provenance for a photo, or an empty dict.
+
+        Photos taken before sidecars existed have none, and a half-written file
+        must not take the gallery down, so every failure returns empty.
+        """
+        try:
+            sidecar_file = photo_file.with_suffix(".json")
+            if not sidecar_file.exists():
+                return {}
+            return json.loads(sidecar_file.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
     def get_photo_info(self, photo_id: str) -> Dict:
         """Get information about a specific photo."""
         # Get all photos without pagination to search through them
@@ -1517,6 +1536,35 @@ async def reprocess_single_photo(photo_id: str):
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to reprocess photo: {str(e)}")
+
+@app.post("/api/photos/{photo_id}/develop")
+async def develop_photo_with_recipe(photo_id: str, request: Request):
+    """Re-render an existing photo with another recipe's look.
+
+    Only the render half is reapplicable — the capture settings are gone the
+    moment the shutter fired. That asymmetry is why recipes are split in two.
+    """
+    body = await request.json()
+    recipe_id = body.get("recipe_id")
+
+    settings = settings_manager.load_settings()
+    match = [r for r in settings["recipes"]["items"] if r.get("id") == recipe_id]
+    if not match:
+        raise HTTPException(status_code=404, detail=f"No recipe '{recipe_id}'")
+
+    original = Path(PHOTOS_PATH) / f"{photo_id}.jpg"
+    if not original.exists():
+        raise HTTPException(status_code=404, detail=f"No photo '{photo_id}'")
+
+    try:
+        result = await reframe_client.post(
+            f"/reprocess/{photo_id}",
+            json={"processing_settings": match[0]["render"]})
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not develop photo: {e}")
+
+    return {"status": "success", "photo_id": photo_id, "recipe_id": recipe_id,
+            "result": result}
 
 # Global variable to track download progress
 download_progress = {"status": "idle", "processed": 0, "total": 0, "message": ""}
