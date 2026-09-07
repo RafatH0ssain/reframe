@@ -28,9 +28,18 @@ class RecipeRouteTests(unittest.TestCase):
         self.client_patch = patch.object(dashboard.reframe_client, "post", fake_post)
         self.client_patch.start()
 
+        # Photo-related tests write fixture .jpg/.json files. Point PHOTOS_PATH
+        # at a scratch directory instead of the repo's real photos/ so those
+        # fixtures never land in (or overwrite) the actual photo library.
+        self.photos_dir = tempfile.TemporaryDirectory()
+        self.photos_path_patch = patch.object(dashboard, "PHOTOS_PATH", self.photos_dir.name)
+        self.photos_path_patch.start()
+
         self.client = TestClient(dashboard.app)
 
     def tearDown(self):
+        self.photos_path_patch.stop()
+        self.photos_dir.cleanup()
         self.client_patch.stop()
         self.manager_patch.stop()
         self.temp_dir.cleanup()
@@ -328,6 +337,18 @@ class RecipeRouteTests(unittest.TestCase):
         (photos / "90003.json").write_text("{not json", encoding="utf-8")
         listed = dashboard.PhotoManager().get_all_photos()["photos"]
         entry = [p for p in listed if p["id"] == "90003"][0]
+        self.assertIsNone(entry["group_id"])
+
+    def test_a_sidecar_holding_valid_json_that_is_not_an_object_is_ignored(self):
+        # `{not json` is a decode error; `[]` parses fine and used to reach
+        # .get(), taking down the entire gallery rather than one photo.
+        from PIL import Image
+        photos = Path(dashboard.PHOTOS_PATH)
+        photos.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (4, 4)).save(photos / "90006.jpg", format="JPEG")
+        (photos / "90006.json").write_text("[]", encoding="utf-8")
+        listed = dashboard.PhotoManager().get_all_photos()["photos"]
+        entry = [p for p in listed if p["id"] == "90006"][0]
         self.assertIsNone(entry["group_id"])
 
     def test_develop_applies_a_recipes_render_settings(self):

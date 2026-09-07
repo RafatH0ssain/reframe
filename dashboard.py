@@ -666,14 +666,18 @@ class PhotoManager:
     def _read_sidecar(self, photo_file):
         """Provenance for a photo, or an empty dict.
 
-        Photos taken before sidecars existed have none, and a half-written file
-        must not take the gallery down, so every failure returns empty.
+        Photos taken before sidecars existed have none, and a half-written or
+        malformed file must not take the gallery down, so every failure
+        returns empty. This includes syntactically valid JSON that isn't an
+        object (e.g. `[]`, `"text"`, `42`, `null`) — callers use `.get(...)`,
+        so anything other than a dict is treated the same as "no sidecar".
         """
         try:
             sidecar_file = photo_file.with_suffix(".json")
             if not sidecar_file.exists():
                 return {}
-            return json.loads(sidecar_file.read_text(encoding="utf-8"))
+            parsed = json.loads(sidecar_file.read_text(encoding="utf-8"))
+            return parsed if isinstance(parsed, dict) else {}
         except Exception:
             return {}
 
