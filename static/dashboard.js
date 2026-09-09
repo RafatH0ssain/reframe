@@ -4,6 +4,7 @@
             let currentPage = Number.isInteger(requestedInitialPage) && requestedInitialPage > 0 ? requestedInitialPage : 1;
             let latestPhotoLoadRequest = 0;
             let extensionActions = [];
+            let cachedRecipes = [];
             let arenaTokenShouldClear = false;
             let settingsFormSnapshot = null;
             let settingsPageScrollY = 0;
@@ -127,6 +128,14 @@
                                     </svg>
                                     display
                                 </button>
+                                <span class="photo-develop-controls">
+                                    <select class="photo-develop-select" aria-label="Recipe to develop with">
+                                        ${renderRecipeOptions()}
+                                    </select>
+                                    <button type="button" class="action-btn btn-secondary photo-develop-btn">
+                                        develop
+                                    </button>
+                                </span>
                                 ${renderExtensionButtons(photo)}
                             </div>
                         </div>
@@ -135,6 +144,39 @@
                 
                 // Add click handlers for photo cards
                 setupPhotoCardHandlers();
+                attachPhotoGalleryListeners();
+            }
+
+            function renderRecipeOptions() {
+                if (!cachedRecipes.length) {
+                    return '<option value="">no recipes</option>';
+                }
+                return cachedRecipes.map(recipe =>
+                    `<option value="${escapeAttr(recipe.id)}">${escapeHtml(recipe.name || recipe.id)}</option>`
+                ).join('');
+            }
+
+            function attachPhotoGalleryListeners() {
+                const grid = document.getElementById('photo-grid');
+                if (!grid) return;
+                // Remove any existing listener to avoid duplicates, same pattern
+                // used for the recipe list's delegated listener.
+                grid.removeEventListener('click', handlePhotoGalleryClick);
+                grid.addEventListener('click', handlePhotoGalleryClick);
+            }
+
+            function handlePhotoGalleryClick(event) {
+                const developBtn = event.target.closest('.photo-develop-btn');
+                if (!developBtn) return;
+                const card = developBtn.closest('[data-photo-id]');
+                if (!card) return;
+                const select = card.querySelector('.photo-develop-select');
+                const recipeId = select ? select.value : '';
+                if (!recipeId) {
+                    return;
+                }
+                const photoId = card.getAttribute('data-photo-id');
+                developPhoto(photoId, recipeId);
             }
 
             function renderExtensionButtons(photo) {
@@ -275,6 +317,11 @@
                     
                     // Handle click/tap events
                     card.addEventListener('click', function(e) {
+                        // Interacting with the develop select/button must not
+                        // also open the photo viewer underneath it.
+                        if (e.target.closest('.photo-develop-controls')) {
+                            return;
+                        }
                         const currentTime = new Date().getTime();
                         const tapLength = currentTime - lastTap;
                         
@@ -1245,6 +1292,9 @@
             // Load photos on page load
             document.addEventListener('DOMContentLoaded', function() {
                 loadPhotos(currentPage);
+                // Populate the develop-with-recipe dropdowns on the gallery
+                // cards without requiring Settings to be opened first.
+                loadRecipes();
                 updateAutoRefreshInterval();
                 updateBatteryLevel();
                 
@@ -1301,7 +1351,9 @@
                     if (!response.ok) {
                         throw new Error('Could not load recipes');
                     }
-                    renderRecipes(await response.json());
+                    const data = await response.json();
+                    cachedRecipes = data.items || [];
+                    renderRecipes(data);
                     attachRecipeListeners();
                 } catch (error) {
                     console.error('Error loading recipes:', error);

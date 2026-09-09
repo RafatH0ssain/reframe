@@ -997,7 +997,13 @@ async def list_photos(page: int = 1, limit: int = 20):
                     dith_name = _bn(photo["dithered_path"])
                     photo["dithered_path"] = f"/dithered/{dith_name}"
             except Exception:
-                continue
+                pass
+            # Merge provenance from the sidecar the hardware service doesn't know about.
+            sidecar = photo_manager._read_sidecar(Path(PHOTOS_PATH) / photo.get("id", ""))
+            photo["group_id"] = sidecar.get("group_id")
+            photo["frame_label"] = sidecar.get("frame_label")
+            photo["recipe_name"] = sidecar.get("recipe_name")
+            photo["program"] = sidecar.get("program")
     except Exception as e:
         logging.warning(f"Error fetching photos from hardware service: {e}")
         all_photos = []
@@ -1028,6 +1034,12 @@ async def get_photo_info(photo_id: str):
             photo["original_path"] = f"/photos/{_bn(photo['original_path'])}"
         if photo.get("dithered_path"):
             photo["dithered_path"] = f"/dithered/{_bn(photo['dithered_path'])}"
+        # Merge provenance from the sidecar the hardware service doesn't know about.
+        sidecar = photo_manager._read_sidecar(Path(PHOTOS_PATH) / photo.get("id", photo_id))
+        photo["group_id"] = sidecar.get("group_id")
+        photo["frame_label"] = sidecar.get("frame_label")
+        photo["recipe_name"] = sidecar.get("recipe_name")
+        photo["program"] = sidecar.get("program")
         return photo
     except Exception as e:
         raise HTTPException(status_code=404, detail=str(e))

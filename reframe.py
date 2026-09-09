@@ -1577,6 +1577,7 @@ class CameraSystem:
                 try:
                     merged = dict(base_controls)
                     merged.update(frame.controls)
+                    merged = camera_controls.clamp_controls(merged, self.camera_manager.sensor_limits)
                     self.camera_manager.picam2.set_controls(merged)
 
                     photo_path = self.file_manager.get_new_file_path(

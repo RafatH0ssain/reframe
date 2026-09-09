@@ -381,6 +381,59 @@ class RecipeRouteTests(unittest.TestCase):
                                     json={"recipe_id": "standard"})
         self.assertEqual(response.status_code, 404)
 
+    def test_list_photos_route_merges_sidecar_provenance(self):
+        # The gallery calls /api/photos, not PhotoManager directly -- this is
+        # the route the frontend actually hits, proxying to the hardware
+        # service's own photo shape (see reframe.py's list_all_photos).
+        self._write_photo_with_sidecar("90007", "grp-4", "0EV")
+
+        async def fake_get(path):
+            return [{
+                "id": "90007",
+                "original_path": str(Path(dashboard.PHOTOS_PATH) / "90007.jpg"),
+                "dithered_path": None,
+                "has_dithered": False,
+                "file_size": 123,
+                "created_at": 0,
+                "filename": "90007.jpg",
+            }]
+
+        with patch.object(dashboard.reframe_client, "get", fake_get):
+            response = self.client.get("/api/photos")
+
+        self.assertEqual(response.status_code, 200)
+        entry = [p for p in response.json()["photos"] if p["id"] == "90007"][0]
+        self.assertEqual(entry["group_id"], "grp-4")
+        self.assertEqual(entry["frame_label"], "0EV")
+        self.assertEqual(entry["recipe_name"], "Night")
+
+    def test_list_photos_route_photo_without_sidecar_still_lists_with_none_fields(self):
+        from PIL import Image
+        photos = Path(dashboard.PHOTOS_PATH)
+        photos.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", (4, 4)).save(photos / "90008.jpg", format="JPEG")
+
+        async def fake_get(path):
+            return [{
+                "id": "90008",
+                "original_path": str(photos / "90008.jpg"),
+                "dithered_path": None,
+                "has_dithered": False,
+                "file_size": 123,
+                "created_at": 0,
+                "filename": "90008.jpg",
+            }]
+
+        with patch.object(dashboard.reframe_client, "get", fake_get):
+            response = self.client.get("/api/photos")
+
+        self.assertEqual(response.status_code, 200)
+        entry = [p for p in response.json()["photos"] if p["id"] == "90008"][0]
+        self.assertIsNone(entry["group_id"])
+        self.assertIsNone(entry["frame_label"])
+        self.assertIsNone(entry["recipe_name"])
+        self.assertIsNone(entry["program"])
+
 
 if __name__ == "__main__":
     unittest.main()

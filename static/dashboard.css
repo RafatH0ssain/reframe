@@ -224,6 +224,22 @@
                 justify-content: center;
             }
 
+            .photo-develop-controls {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+            }
+
+            .photo-develop-select {
+                font-family: serif;
+                font-size: 0.85rem;
+                padding: 6px 8px;
+                border: 1px solid var(--tertiary-color);
+                background: rgba(255, 255, 255, 0.9);
+                color: var(--secondary-color);
+                max-width: 110px;
+            }
+
             .action-btn {
                 padding: 8px 12px;
                 font-size: 0.9rem;

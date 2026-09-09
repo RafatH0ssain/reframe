@@ -131,6 +131,31 @@ class RouteTests(unittest.TestCase):
         self.assertIn("function developPhoto", js)
         self.assertIn("/develop", js)
 
+    def test_gallery_has_a_develop_control_wired_by_delegation(self):
+        # developPhoto() previously had zero call sites -- the gallery must
+        # actually offer a way to trigger it, and it must follow the same
+        # data-attribute + delegated-listener pattern as the recipe list
+        # rather than an inline onclick carrying interpolated recipe values
+        # (this panel shipped a stored XSS earlier in this project).
+        js = JS.read_text(encoding="utf-8")
+        self.assertIn("photo-develop-btn", js)
+        self.assertIn("photo-develop-select", js)
+        self.assertIn("function handlePhotoGalleryClick", js)
+        self.assertIn("function attachPhotoGalleryListeners", js)
+        self.assertIn("developPhoto(photoId, recipeId)", js)
+        self.assertNotIn('onclick="developPhoto(', js)
+
+    def test_develop_control_recipe_options_are_escaped(self):
+        js = JS.read_text(encoding="utf-8")
+        self.assertIn("function renderRecipeOptions", js)
+        self.assertIn("escapeAttr(recipe.id)", js)
+        self.assertIn("escapeHtml(recipe.name || recipe.id)", js)
+
+    def test_load_recipes_caches_the_list_for_the_gallery(self):
+        js = JS.read_text(encoding="utf-8")
+        self.assertIn("let cachedRecipes", js)
+        self.assertIn("cachedRecipes = data.items", js)
+
 
 if __name__ == "__main__":
     unittest.main()

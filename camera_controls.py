@@ -175,6 +175,72 @@ def build_controls(camera, limits, fast_mode=False, include_autofocus=True):
     return controls
 
 
+def clamp_controls(controls, limits):
+    """Clamp an already-built control dict to the sensor's reported ranges.
+
+    build_controls() clamps ExposureTime/AnalogueGain against the sensor at
+    the moment it builds the base recipe's controls, but anything that
+    derives further controls from that base afterwards -- currently
+    Bracket._overrides(), which doubles ExposureTime per EV stop -- can walk
+    straight back out of range. A legal 60-second recipe with a +4EV bracket
+    step asks for a 16-minute exposure; if that goes to picamera2 unclamped,
+    libcamera's own clamping (if any) happens silently and the sidecar
+    records a "resolved_controls" that was never actually applied.
+
+    Only touches ExposureTime, AnalogueGain and FrameDurationLimits -- any
+    other key (AeEnable, ExposureValue, Sharpness, AfMode, ...) passes
+    through untouched, and a dict with none of the three manual keys comes
+    back unchanged.
+
+    FrameDurationLimits is never left shorter than the (post-clamp)
+    ExposureTime -- the same "widen, never shrink below the exposure" rule
+    build_controls() applies -- but unlike build_controls() it also is not
+    left wider than necessary: if ExposureTime itself had to be clamped down,
+    a FrameDurationLimits sized for the original, illegal request would still
+    make libcamera hold the frame open for the request that was rejected.
+    """
+    if not isinstance(controls, dict):
+        return controls
+
+    limits = limits or DEFAULT_SENSOR_LIMITS
+    clamped = dict(controls)
+
+    exposure_us = None
+    if "ExposureTime" in clamped:
+        exposure_limits = limits.get("exposure_time_us", DEFAULT_SENSOR_LIMITS["exposure_time_us"])
+        requested = clamped["ExposureTime"]
+        exposure_us = _clamp(requested, exposure_limits["min"], exposure_limits["max"])
+        if exposure_us != requested:
+            logger.warning(
+                "ExposureTime=%s clamped to %s (sensor range %s-%s us)",
+                requested, exposure_us, exposure_limits["min"], exposure_limits["max"])
+        exposure_us = int(exposure_us)
+        clamped["ExposureTime"] = exposure_us
+
+    if "AnalogueGain" in clamped:
+        gain_limits = limits.get("analogue_gain", DEFAULT_SENSOR_LIMITS["analogue_gain"])
+        requested_gain = clamped["AnalogueGain"]
+        gain = _clamp(requested_gain, gain_limits["min"], gain_limits["max"])
+        if gain != requested_gain:
+            logger.warning(
+                "AnalogueGain=%s clamped to %s (sensor range %s-%s)",
+                requested_gain, gain, gain_limits["min"], gain_limits["max"])
+        clamped["AnalogueGain"] = gain
+
+    if "FrameDurationLimits" in clamped and exposure_us is not None:
+        frame_limits = limits.get("frame_duration_us", DEFAULT_SENSOR_LIMITS["frame_duration_us"])
+        requested_pair = clamped["FrameDurationLimits"]
+        frame_us = int(max(exposure_us, frame_limits.get("min", 0)))
+        new_pair = (frame_us, frame_us)
+        if tuple(requested_pair) != new_pair:
+            logger.warning(
+                "FrameDurationLimits=%s clamped to %s to match ExposureTime=%s us",
+                requested_pair, new_pair, exposure_us)
+        clamped["FrameDurationLimits"] = new_pair
+
+    return clamped
+
+
 def autofocus_settle_seconds(camera, has_captured, fast_mode):
     """How long to wait for focus before capturing.
 

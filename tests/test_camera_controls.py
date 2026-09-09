@@ -215,5 +215,59 @@ class AutofocusSettleTests(unittest.TestCase):
             0.1)
 
 
+class ClampControlsTests(unittest.TestCase):
+    def test_over_long_exposure_time_is_clamped_to_sensor_maximum(self):
+        # A bracket frame at +4EV on a legal 60s recipe requests an
+        # ExposureTime the sensor cannot deliver; clamp_controls is the last
+        # line of defence before it reaches picamera2 and the sidecar.
+        controls = {"AeEnable": False, "ExposureTime": 960_000_000,
+                    "AnalogueGain": 1.5, "FrameDurationLimits": (960_000_000, 960_000_000)}
+        with self.assertLogs("camera_controls", level="WARNING"):
+            clamped = camera_controls.clamp_controls(controls, LIMITS)
+        self.assertEqual(clamped["ExposureTime"], LIMITS["exposure_time_us"]["max"])
+
+    def test_frame_duration_limits_cover_the_clamped_value_not_the_requested_one(self):
+        controls = {"ExposureTime": 960_000_000,
+                    "FrameDurationLimits": (960_000_000, 960_000_000)}
+        with self.assertLogs("camera_controls", level="WARNING"):
+            clamped = camera_controls.clamp_controls(controls, LIMITS)
+        low, high = clamped["FrameDurationLimits"]
+        clamped_exposure = LIMITS["exposure_time_us"]["max"]
+        self.assertEqual(low, clamped_exposure)
+        self.assertEqual(high, clamped_exposure)
+        self.assertNotEqual(low, 960_000_000)
+
+    def test_gain_above_sensor_range_is_clamped_down(self):
+        controls = {"ExposureTime": 4_000_000, "AnalogueGain": 99.0}
+        with self.assertLogs("camera_controls", level="WARNING"):
+            clamped = camera_controls.clamp_controls(controls, LIMITS)
+        self.assertEqual(clamped["AnalogueGain"], LIMITS["analogue_gain"]["max"])
+
+    def test_gain_below_sensor_range_is_clamped_up(self):
+        controls = {"ExposureTime": 4_000_000, "AnalogueGain": 0.1}
+        with self.assertLogs("camera_controls", level="WARNING"):
+            clamped = camera_controls.clamp_controls(controls, LIMITS)
+        self.assertEqual(clamped["AnalogueGain"], LIMITS["analogue_gain"]["min"])
+
+    def test_auto_mode_dict_with_no_manual_keys_passes_through_unchanged(self):
+        controls = {"AeEnable": True, "ExposureValue": 1, "Sharpness": 4, "AfMode": 2}
+        clamped = camera_controls.clamp_controls(controls, LIMITS)
+        self.assertEqual(clamped, controls)
+
+    def test_in_range_controls_pass_through_unchanged_without_logging(self):
+        controls = {"AeEnable": False, "ExposureTime": 4_000_000, "AnalogueGain": 1.5,
+                    "FrameDurationLimits": (4_000_000, 4_000_000)}
+        clamped = camera_controls.clamp_controls(controls, LIMITS)
+        self.assertEqual(clamped["ExposureTime"], 4_000_000)
+        self.assertEqual(clamped["AnalogueGain"], 1.5)
+        self.assertEqual(clamped["FrameDurationLimits"], (4_000_000, 4_000_000))
+
+    def test_clamping_emits_a_warning(self):
+        controls = {"ExposureTime": 900_000_000}
+        with self.assertLogs("camera_controls", level="WARNING") as cm:
+            camera_controls.clamp_controls(controls, LIMITS)
+        self.assertTrue(any("ExposureTime" in message for message in cm.output))
+
+
 if __name__ == "__main__":
     unittest.main()
