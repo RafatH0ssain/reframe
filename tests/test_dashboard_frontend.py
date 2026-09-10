@@ -156,6 +156,18 @@ class RouteTests(unittest.TestCase):
         self.assertIn("let cachedRecipes", js)
         self.assertIn("cachedRecipes = data.items", js)
 
+    def test_loading_recipes_refreshes_the_gallery_dropdowns(self):
+        # loadPhotos and loadRecipes both run unawaited on DOMContentLoaded, so
+        # whichever finishes second has to refresh the other's output. The
+        # photos.length guard stops a recipes-first ordering from painting
+        # "no photos found" over a load that is still in flight.
+        js = JS.read_text(encoding="utf-8")
+        start = js.index("async function loadRecipes")
+        body = js[start:start + 900]
+        self.assertIn("cachedRecipes = data.items", body)
+        self.assertIn("renderGallery()", body)
+        self.assertIn("photos.length", body)
+
 
 if __name__ == "__main__":
     unittest.main()

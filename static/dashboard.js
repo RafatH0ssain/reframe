@@ -1353,6 +1353,14 @@
                     }
                     const data = await response.json();
                     cachedRecipes = data.items || [];
+                    // The gallery's develop dropdowns read cachedRecipes at
+                    // render time, and loadPhotos() may already have painted
+                    // them empty -- both run unawaited on DOMContentLoaded.
+                    // Guarded because renderGallery() with no photos loaded
+                    // yet would paint "no photos found" over a pending load.
+                    if (photos.length) {
+                        renderGallery();
+                    }
                     renderRecipes(data);
                     attachRecipeListeners();
                 } catch (error) {
